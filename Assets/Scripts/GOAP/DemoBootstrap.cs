@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace GOAP
 {
@@ -151,34 +154,56 @@ namespace GOAP
             }
         }
 
+        // Reads keys from whichever input backend the project uses. The new Input System is
+        // preferred when present (Unity 6 default); it falls back to the legacy Input Manager
+        // otherwise. This means the demo runs with no Player Settings changes required.
         private void HandleInput()
         {
-            if (Input.GetKeyDown(KeyCode.S))
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            if (kb != null)
             {
-                // Steal the axe and empty the shed: forces the agent onto the buy-axe branch.
-                _agent.State.Set(HasAxe, false);
-                _agent.State.Set(AxeInShed, false);
-                _lastEvent = "You stole the axe and emptied the shed!";
-                _agent.Replan("world changed by player");
+                if (kb.sKey.wasPressedThisFrame) StealAxe();
+                else if (kb.rKey.wasPressedThisFrame) RestockShed();
+                else if (kb.gKey.wasPressedThisFrame) GiveGold();
+                else if (kb.bKey.wasPressedThisFrame) BreakAxe();
             }
-            else if (Input.GetKeyDown(KeyCode.R))
-            {
-                _agent.State.Set(AxeInShed, true);
-                _lastEvent = "Shed restocked with an axe";
-                _agent.Replan("world changed by player");
-            }
-            else if (Input.GetKeyDown(KeyCode.G))
-            {
-                _agent.State.Set(HasGold, true);
-                _lastEvent = "Gave the agent gold";
-                _agent.Replan("world changed by player");
-            }
-            else if (Input.GetKeyDown(KeyCode.B))
-            {
-                _agent.State.Set(HasAxe, false);
-                _lastEvent = "The axe broke!";
-                _agent.Replan("world changed by player");
-            }
+#elif ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.S)) StealAxe();
+            else if (Input.GetKeyDown(KeyCode.R)) RestockShed();
+            else if (Input.GetKeyDown(KeyCode.G)) GiveGold();
+            else if (Input.GetKeyDown(KeyCode.B)) BreakAxe();
+#endif
+        }
+
+        // Steal the axe and empty the shed: forces the agent onto the buy-axe branch.
+        private void StealAxe()
+        {
+            _agent.State.Set(HasAxe, false);
+            _agent.State.Set(AxeInShed, false);
+            _lastEvent = "You stole the axe and emptied the shed!";
+            _agent.Replan("world changed by player");
+        }
+
+        private void RestockShed()
+        {
+            _agent.State.Set(AxeInShed, true);
+            _lastEvent = "Shed restocked with an axe";
+            _agent.Replan("world changed by player");
+        }
+
+        private void GiveGold()
+        {
+            _agent.State.Set(HasGold, true);
+            _lastEvent = "Gave the agent gold";
+            _agent.Replan("world changed by player");
+        }
+
+        private void BreakAxe()
+        {
+            _agent.State.Set(HasAxe, false);
+            _lastEvent = "The axe broke!";
+            _agent.Replan("world changed by player");
         }
 
         // ---------------------------------------------------------------- helpers + HUD
