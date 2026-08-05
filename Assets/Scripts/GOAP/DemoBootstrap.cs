@@ -243,26 +243,21 @@ namespace GOAP
                 _agent.Replan(reason);
         }
 
-        // Switch the woodcutter between the GOAP brain and the hand-authored FSM. Resets to a clean,
-        // freshly-supplied order and recentres the agent so each brain starts from the same place.
+        // Switch the woodcutter between the GOAP brain and the hand-authored FSM, IN PLACE — the
+        // world state and position are left untouched so the newly-active brain has to cope with the
+        // exact situation the other one was in. That is the whole demonstration: get the FSM stuck,
+        // press [M], and watch GOAP re-plan its way out of the very same state.
         private void ToggleBrain()
         {
             _useGoap = !_useGoap;
 
-            _agent.State.Set(HasAxe, false);
-            _agent.State.Set(HasWood, false);
-            _agent.State.Set(AxeInShed, true);
-            _agent.State.Set(HasGold, true);
-            _agent.State.Set(WoodDelivered, false);
-            _agent.transform.position = new Vector3(0f, 1f, 0f);
-
             _agent.enabled = _useGoap;
             _fsm.enabled = !_useGoap;
             if (_useGoap)
-                _agent.Replan("switched to GOAP brain");
+                _agent.Replan("switched to GOAP brain — solving the current world state");
 
             _lastEvent = _useGoap
-                ? "Brain: GOAP (adaptive — plans and replans with A*)"
+                ? "Brain: GOAP takes over the CURRENT situation and re-plans"
                 : "Brain: hand-authored FSM (fixed route, no planning)";
             Debug.Log("[GOAP][brain] Switched to " + (_useGoap ? "GOAP" : "FSM"));
         }
