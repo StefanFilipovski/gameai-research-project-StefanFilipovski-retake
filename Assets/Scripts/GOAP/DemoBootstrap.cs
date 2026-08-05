@@ -135,17 +135,22 @@ namespace GOAP
         {
             HandleInput();
 
-            // Keep the demo running: once wood is delivered, pause briefly then reset the job so
-            // the agent has something to plan for again.
+            // Keep the demo running: once wood is delivered, pause briefly then issue a new order.
+            // We reset the axe too (the tool is "returned" to the shed) and replenish supplies, so
+            // every cycle shows the full fetch-axe -> chop -> deliver route and the agent can always
+            // form a plan (no accidental dead-ends from spent gold / empty shed).
             if (_agent.State.Get(WoodDelivered))
             {
                 _resetTimer += Time.deltaTime;
-                if (_resetTimer > 1.5f)
+                if (_resetTimer > 0.6f)
                 {
                     _resetTimer = 0f;
                     _agent.State.Set(WoodDelivered, false);
                     _agent.State.Set(HasWood, false);
-                    _lastEvent = "New order: deliver more wood";
+                    _agent.State.Set(HasAxe, false);
+                    _agent.State.Set(AxeInShed, true);
+                    _agent.State.Set(HasGold, true);
+                    _lastEvent = "New order: fetch an axe, chop, and deliver";
                 }
             }
             else
@@ -306,11 +311,21 @@ namespace GOAP
         {
             if (t == null || Camera.main == null)
                 return;
-            Vector3 sp = Camera.main.WorldToScreenPoint(t.position + Vector3.up * 1.6f);
+            Vector3 sp = Camera.main.WorldToScreenPoint(t.position + Vector3.up * 1.9f);
             if (sp.z < 0f)
                 return; // behind the camera
-            Rect r = new Rect(sp.x - 50f, Screen.height - sp.y - 12f, 100f, 24f);
-            GUI.Label(r, text, _tag);
+
+            // Size the box to the actual text so nothing is clipped, and draw a dark chip
+            // behind it so the white label is readable over any colour underneath.
+            GUIContent gc = new GUIContent(text);
+            Vector2 size = _tag.CalcSize(gc);
+            float padX = 8f, padY = 4f;
+            Rect box = new Rect(sp.x - size.x / 2f - padX,
+                                Screen.height - sp.y - size.y / 2f - padY,
+                                size.x + padX * 2f,
+                                size.y + padY * 2f);
+            GUI.DrawTexture(box, _panelTex);
+            GUI.Label(box, gc, _tag);
         }
     }
 }
