@@ -151,6 +151,7 @@ namespace GOAP
                     _agent.State.Set(AxeInShed, true);
                     _agent.State.Set(HasGold, true);
                     _lastEvent = "New order: fetch an axe, chop, and deliver";
+                    Debug.Log("[GOAP][world] New order issued (axe reset, shed restocked, gold given)");
                 }
             }
             else
@@ -187,28 +188,32 @@ namespace GOAP
             _agent.State.Set(HasAxe, false);
             _agent.State.Set(AxeInShed, false);
             _lastEvent = "You stole the axe and emptied the shed!";
-            _agent.Replan("world changed by player");
+            Debug.Log("[GOAP][player] S: stole axe + emptied shed (HasAxe=false, AxeInShed=false)");
+            _agent.Replan("player stole axe / emptied shed");
         }
 
         private void RestockShed()
         {
             _agent.State.Set(AxeInShed, true);
             _lastEvent = "Shed restocked with an axe";
-            _agent.Replan("world changed by player");
+            Debug.Log("[GOAP][player] R: restocked shed (AxeInShed=true)");
+            _agent.Replan("player restocked shed");
         }
 
         private void GiveGold()
         {
             _agent.State.Set(HasGold, true);
             _lastEvent = "Gave the agent gold";
-            _agent.Replan("world changed by player");
+            Debug.Log("[GOAP][player] G: gave gold (HasGold=true)");
+            _agent.Replan("player gave gold");
         }
 
         private void BreakAxe()
         {
             _agent.State.Set(HasAxe, false);
             _lastEvent = "The axe broke!";
-            _agent.Replan("world changed by player");
+            Debug.Log("[GOAP][player] B: broke the axe (HasAxe=false)");
+            _agent.Replan("player broke the axe");
         }
 
         // ---------------------------------------------------------------- helpers + HUD

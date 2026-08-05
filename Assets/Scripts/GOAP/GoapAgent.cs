@@ -22,6 +22,9 @@ namespace GOAP
     {
         public float MoveSpeed = 3.5f;
 
+        // When on, the agent prints its planning/execution/replanning trace to the Console.
+        public bool VerboseLogging = true;
+
         // The agent's live picture of the world. The planner reads this as its start state,
         // and completed actions write their effects back into it.
         public WorldState State = new WorldState();
@@ -39,6 +42,7 @@ namespace GOAP
         private enum Phase { Idle, Moving, Performing }
         private Phase _phase = Phase.Idle;
         private float _performTimer;
+        private bool _loggedNoPlan; // avoids spamming the "no plan" warning every frame
 
         // ---- Exposed for the on-screen HUD ----
         public string StatusLine { get; private set; } = "Booting...";
@@ -108,6 +112,9 @@ namespace GOAP
             foreach (KeyValuePair<string, bool> e in _current.Effects)
                 State.Set(e.Key, e.Value);
 
+            if (VerboseLogging)
+                Debug.Log("[GOAP]   done '" + _current.Name + "'  -> " + DescribeEffects(_current.Effects));
+
             // ...and move on to the next action in the plan.
             AdvancePlan();
         }
@@ -126,9 +133,20 @@ namespace GOAP
             if (plan == null || plan.Count == 0)
             {
                 StatusLine = "No plan found for goal '" + _activeGoal.Name + "'";
+                if (VerboseLogging && !_loggedNoPlan)
+                {
+                    Debug.LogWarning("[GOAP] No valid plan for goal '" + _activeGoal.Name +
+                                     "'. World: " + DescribeState());
+                    _loggedNoPlan = true;
+                }
                 _plan = null;
                 return;
             }
+
+            _loggedNoPlan = false;
+            if (VerboseLogging)
+                Debug.Log("[GOAP] Planned for goal '" + _activeGoal.Name + "': " +
+                          DescribePlan(plan) + "  (total cost " + TotalCost(plan) + ")");
 
             _plan = plan;
             _planIndex = -1;
@@ -148,12 +166,19 @@ namespace GOAP
 
             _current = _plan[_planIndex];
             _phase = Phase.Moving;
+
+            if (VerboseLogging)
+                Debug.Log("[GOAP]   step " + (_planIndex + 1) + "/" + _plan.Count +
+                          ": start '" + _current.Name + "' (cost " + _current.Cost + ")" +
+                          (_current.Target != null ? "  -> moving to " + _current.Target.name : ""));
         }
 
         /// <summary>Discard the current plan and re-plan from scratch on the next frame.</summary>
         public void Replan(string reason)
         {
             StatusLine = "Replanning (" + reason + ")";
+            if (VerboseLogging)
+                Debug.Log("[GOAP] Replan requested: " + reason);
             _plan = null;
             _current = null;
             _phase = Phase.Idle;
@@ -171,6 +196,40 @@ namespace GOAP
                     best = g;
             }
             return best;
+        }
+
+        // ---- Logging helpers ----
+
+        private static string DescribePlan(List<GoapAction> plan)
+        {
+            string[] names = new string[plan.Count];
+            for (int i = 0; i < plan.Count; i++)
+                names[i] = plan[i].Name;
+            return string.Join(" -> ", names);
+        }
+
+        private static float TotalCost(List<GoapAction> plan)
+        {
+            float c = 0f;
+            foreach (GoapAction a in plan)
+                c += a.Cost;
+            return c;
+        }
+
+        private static string DescribeEffects(Dictionary<string, bool> effects)
+        {
+            List<string> parts = new List<string>();
+            foreach (KeyValuePair<string, bool> e in effects)
+                parts.Add(e.Key + "=" + e.Value);
+            return string.Join(", ", parts);
+        }
+
+        private string DescribeState()
+        {
+            List<string> parts = new List<string>();
+            foreach (KeyValuePair<string, bool> f in State.Facts)
+                parts.Add(f.Key + "=" + f.Value);
+            return "{ " + string.Join(", ", parts) + " }";
         }
     }
 }
