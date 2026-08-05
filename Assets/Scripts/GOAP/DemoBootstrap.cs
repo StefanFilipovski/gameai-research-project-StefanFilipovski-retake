@@ -74,7 +74,7 @@ namespace GOAP
             cam.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
             cam.clearFlags = CameraClearFlags.SolidColor;
 
-            if (FindObjectOfType<Light>() == null)
+            if (FindFirstObjectByType<Light>() == null)
             {
                 GameObject lightGo = new GameObject("Directional Light");
                 Light l = lightGo.AddComponent<Light>();
@@ -221,16 +221,16 @@ namespace GOAP
 
         private void OnGUI()
         {
+            // Scale the HUD up on high-resolution screens so the text stays readable.
+            float hudScale = Mathf.Max(1f, Screen.height / 720f);
+
             if (_h1 == null)
             {
-                // Scale the HUD up on high-resolution screens so the text stays readable.
-                float s = Mathf.Max(1f, Screen.height / 720f);
-
-                _h1 = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(26 * s), fontStyle = FontStyle.Bold };
+                _h1 = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(26 * hudScale), fontStyle = FontStyle.Bold };
                 _h1.normal.textColor = Color.white;
-                _body = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(18 * s) };
+                _body = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(18 * hudScale) };
                 _body.normal.textColor = Color.white;
-                _tag = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * s), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+                _tag = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * hudScale), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
                 _tag.normal.textColor = Color.white;
 
                 _panelTex = new Texture2D(1, 1);
@@ -240,9 +240,8 @@ namespace GOAP
 
             DrawWorldLabels();
 
-            float s = Mathf.Max(1f, Screen.height / 720f);
             const int hudLines = 16;                 // roughly how many text rows the HUD draws
-            float lineHeight = 26f * s;              // ~ body font size * line spacing
+            float lineHeight = 26f * hudScale;       // ~ body font size * line spacing
             float panelW = Mathf.Max(380f, Screen.width * 0.30f);
             float panelH = Mathf.Min(Screen.height - 24f, 30f + hudLines * lineHeight);
             Rect panelRect = new Rect(12, 12, panelW, panelH);
