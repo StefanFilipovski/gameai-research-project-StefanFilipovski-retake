@@ -217,20 +217,38 @@ namespace GOAP
         }
 
         private GUIStyle _h1, _body, _tag;
+        private Texture2D _panelTex;
 
         private void OnGUI()
         {
             if (_h1 == null)
             {
-                _h1 = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
-                _body = new GUIStyle(GUI.skin.label) { fontSize = 15 };
-                _tag = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+                // Scale the HUD up on high-resolution screens so the text stays readable.
+                float s = Mathf.Max(1f, Screen.height / 720f);
+
+                _h1 = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(26 * s), fontStyle = FontStyle.Bold };
+                _h1.normal.textColor = Color.white;
+                _body = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(18 * s) };
+                _body.normal.textColor = Color.white;
+                _tag = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * s), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
                 _tag.normal.textColor = Color.white;
+
+                _panelTex = new Texture2D(1, 1);
+                _panelTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.65f));
+                _panelTex.Apply();
             }
 
             DrawWorldLabels();
 
-            GUILayout.BeginArea(new Rect(12, 12, 360, Screen.height - 24));
+            float s = Mathf.Max(1f, Screen.height / 720f);
+            const int hudLines = 16;                 // roughly how many text rows the HUD draws
+            float lineHeight = 26f * s;              // ~ body font size * line spacing
+            float panelW = Mathf.Max(380f, Screen.width * 0.30f);
+            float panelH = Mathf.Min(Screen.height - 24f, 30f + hudLines * lineHeight);
+            Rect panelRect = new Rect(12, 12, panelW, panelH);
+            GUI.DrawTexture(panelRect, _panelTex);
+
+            GUILayout.BeginArea(new Rect(panelRect.x + 14, panelRect.y + 12, panelRect.width - 28, panelRect.height - 24));
 
             GUILayout.Label("GOAP — Woodcutter", _h1);
             GUILayout.Space(4);
