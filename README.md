@@ -8,6 +8,10 @@
 > instead of following a hand-authored script. A woodcutter is given a goal — "deliver wood"
 > — and works out the cheapest sequence of actions to achieve it, re-planning on the fly when
 > the world changes underneath it.
+>
+> The demo also ships **a live A\* search visualizer** (press **V**) and **a hand-authored FSM
+> running the same job** (press **M**), so you can watch the planning happen and see exactly
+> where the traditional approach breaks down.
 
 ---
 
@@ -42,6 +46,31 @@ soldiers appeared strikingly tactical while each only carried a handful of gener
 
 GOAP trades a little runtime CPU (the search) for a large reduction in authoring complexity and
 much more adaptive behaviour. That trade is the whole point of the technique.
+
+### Proving it live — the [M] brain toggle
+
+Rather than just asserting that advantage, the demo lets you **run the same woodcutter on two
+different brains** and break them both. Press **M** to swap between:
+
+- **GOAP** — [`GoapAgent.cs`](Assets/Scripts/GOAP/GoapAgent.cs) + the planner, and
+- **a hand-authored FSM** — [`FsmWoodcutter.cs`](Assets/Scripts/GOAP/FsmWoodcutter.cs), wired for
+  exactly the route a designer would author: `shed → tree → stockpile`.
+
+<!-- TODO: insert fsm-vs-goap.gif here — FSM runs fine, [S] gets it stuck, [M] lets GOAP rescue the same state -->
+
+**Left alone, both brains look identical** — they each fetch the axe, chop, and deliver. The
+difference only appears when the world stops matching the script:
+
+| | Hand-authored FSM | GOAP |
+|---|---|---|
+| Happy path | ✅ works perfectly | ✅ works perfectly |
+| Shed emptied mid-task (**S**) | ❌ **stuck** — no "shed is empty" transition was ever authored | ✅ re-plans onto `BuyAxe` |
+| To fix the FSM | write a new state + wire every transition into it | *nothing* — the `BuyAxe` action already existed |
+
+The key detail: **the [M] toggle swaps the brain in place** and leaves the world state untouched.
+So you can get the FSM hopelessly stuck, hand that *exact* situation to GOAP, and watch it plan
+its way out. The FSM did not fail because it was badly written — it failed because a designer has
+to anticipate every situation in advance, and GOAP does not.
 
 ---
 
@@ -197,6 +226,7 @@ scene with a single component.
 | **R** | Restock the shed | Next plan prefers the cheap shed branch again |
 | **G** | Give the agent gold | Re-enables the buy-axe branch when the shed is empty |
 | **B** | Break the agent's axe | Agent must acquire a new axe before it can chop |
+| **M** | Switch brain: GOAP ↔ hand-authored FSM | The comparison above — swaps in place, world untouched |
 | **V** | Toggle the plan-search visualizer | Shows/hides the live A\* search tree (see below) |
 
 Try this: press **S** while the agent walks to the shed and watch it reroute to the shop. Then,
@@ -268,6 +298,7 @@ Assets/Scripts/GOAP/
 ├── GoapGoal.cs       — desired world-state + priority
 ├── GoapPlanner.cs    — A* over world-states (+ optional search recording)  ← the core
 ├── GoapAgent.cs      — plan/execute FSM with live replanning + logging
+├── FsmWoodcutter.cs  — hand-authored FSM brain, for the [M] comparison
 └── DemoBootstrap.cs  — builds the scene, wires the woodcutter, draws the HUD + visualizer
 ```
 
