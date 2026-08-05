@@ -32,6 +32,8 @@ namespace GOAP
         private const string WoodDelivered = "WoodDelivered";
 
         private GoapAgent _agent;
+        private FsmWoodcutter _fsm;
+        private bool _useGoap = true; // which brain drives the woodcutter (toggle with [M])
         private float _resetTimer;
         private string _lastEvent = "";
 
@@ -130,6 +132,17 @@ namespace GOAP
 
             // Have the planner keep its A* search tree so the [V] visualizer can draw it.
             _agent.RecordSearch = true;
+
+            // Add the hand-authored FSM brain for the [M] comparison. It shares the same world
+            // state so player interactions affect whichever brain is currently driving. It starts
+            // disabled — GOAP drives by default.
+            _fsm = go.AddComponent<FsmWoodcutter>();
+            _fsm.State = _agent.State;
+            _fsm.Shed = _shed;
+            _fsm.Tree = _tree;
+            _fsm.Stockpile = _stockpile;
+            _fsm.MoveSpeed = _agent.MoveSpeed;
+            _fsm.enabled = false;
         }
 
         // ---------------------------------------------------------------- interaction + loop
@@ -177,6 +190,7 @@ namespace GOAP
                 else if (kb.gKey.wasPressedThisFrame) GiveGold();
                 else if (kb.bKey.wasPressedThisFrame) BreakAxe();
                 else if (kb.vKey.wasPressedThisFrame) _showSearch = !_showSearch;
+                else if (kb.mKey.wasPressedThisFrame) ToggleBrain();
             }
 #elif ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(KeyCode.S)) StealAxe();
@@ -184,6 +198,7 @@ namespace GOAP
             else if (Input.GetKeyDown(KeyCode.G)) GiveGold();
             else if (Input.GetKeyDown(KeyCode.B)) BreakAxe();
             else if (Input.GetKeyDown(KeyCode.V)) _showSearch = !_showSearch;
+            else if (Input.GetKeyDown(KeyCode.M)) ToggleBrain();
 #endif
         }
 
@@ -194,7 +209,7 @@ namespace GOAP
             _agent.State.Set(AxeInShed, false);
             _lastEvent = "You stole the axe and emptied the shed!";
             Debug.Log("[GOAP][player] S: stole axe + emptied shed (HasAxe=false, AxeInShed=false)");
-            _agent.Replan("player stole axe / emptied shed");
+            ReplanIfGoap("player stole axe / emptied shed");
         }
 
         private void RestockShed()
@@ -202,7 +217,7 @@ namespace GOAP
             _agent.State.Set(AxeInShed, true);
             _lastEvent = "Shed restocked with an axe";
             Debug.Log("[GOAP][player] R: restocked shed (AxeInShed=true)");
-            _agent.Replan("player restocked shed");
+            ReplanIfGoap("player restocked shed");
         }
 
         private void GiveGold()
@@ -210,7 +225,7 @@ namespace GOAP
             _agent.State.Set(HasGold, true);
             _lastEvent = "Gave the agent gold";
             Debug.Log("[GOAP][player] G: gave gold (HasGold=true)");
-            _agent.Replan("player gave gold");
+            ReplanIfGoap("player gave gold");
         }
 
         private void BreakAxe()
@@ -218,7 +233,38 @@ namespace GOAP
             _agent.State.Set(HasAxe, false);
             _lastEvent = "The axe broke!";
             Debug.Log("[GOAP][player] B: broke the axe (HasAxe=false)");
-            _agent.Replan("player broke the axe");
+            ReplanIfGoap("player broke the axe");
+        }
+
+        // Only the GOAP brain re-plans; the FSM reacts on its own by reading the shared world state.
+        private void ReplanIfGoap(string reason)
+        {
+            if (_useGoap)
+                _agent.Replan(reason);
+        }
+
+        // Switch the woodcutter between the GOAP brain and the hand-authored FSM. Resets to a clean,
+        // freshly-supplied order and recentres the agent so each brain starts from the same place.
+        private void ToggleBrain()
+        {
+            _useGoap = !_useGoap;
+
+            _agent.State.Set(HasAxe, false);
+            _agent.State.Set(HasWood, false);
+            _agent.State.Set(AxeInShed, true);
+            _agent.State.Set(HasGold, true);
+            _agent.State.Set(WoodDelivered, false);
+            _agent.transform.position = new Vector3(0f, 1f, 0f);
+
+            _agent.enabled = _useGoap;
+            _fsm.enabled = !_useGoap;
+            if (_useGoap)
+                _agent.Replan("switched to GOAP brain");
+
+            _lastEvent = _useGoap
+                ? "Brain: GOAP (adaptive — plans and replans with A*)"
+                : "Brain: hand-authored FSM (fixed route, no planning)";
+            Debug.Log("[GOAP][brain] Switched to " + (_useGoap ? "GOAP" : "FSM"));
         }
 
         // Explains *why* the current goal is unreachable, in scenario terms, so a "no plan"
@@ -282,7 +328,7 @@ namespace GOAP
 
             DrawWorldLabels();
 
-            const int hudLines = 16;                 // roughly how many text rows the HUD draws
+            const int hudLines = 17;                 // roughly how many text rows the HUD draws
             float lineHeight = 26f * hudScale;       // ~ body font size * line spacing
             float panelW = Mathf.Max(380f, Screen.width * 0.30f);
             float panelH = Mathf.Min(Screen.height - 24f, 30f + hudLines * lineHeight);
@@ -291,28 +337,42 @@ namespace GOAP
 
             GUILayout.BeginArea(new Rect(panelRect.x + 14, panelRect.y + 12, panelRect.width - 28, panelRect.height - 24));
 
-            GUILayout.Label("GOAP — Woodcutter", _h1);
+            GUILayout.Label("GOAP vs FSM — Woodcutter", _h1);
             GUILayout.Space(4);
-            GUILayout.Label("Goal: " + (_agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-"), _body);
-            GUILayout.Label("Status: " + _agent.StatusLine, _body);
+            GUILayout.Label("Brain: " + (_useGoap ? "GOAP (plans with A*)" : "Hand-authored FSM"), _body);
 
-            GUILayout.Space(8);
-            GUILayout.Label("Plan (A* over world-states):", _body);
-            IReadOnlyList<GoapAction> plan = _agent.CurrentPlan;
-            if (plan == null || plan.Count == 0)
+            if (_useGoap)
             {
-                if (_agent.PlanningFailed)
-                    GUILayout.Label(NoPlanHint(), _warn);
+                GUILayout.Label("Goal: " + (_agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-"), _body);
+                GUILayout.Label("Status: " + _agent.StatusLine, _body);
+
+                GUILayout.Space(8);
+                GUILayout.Label("Plan (A* over world-states):", _body);
+                IReadOnlyList<GoapAction> plan = _agent.CurrentPlan;
+                if (plan == null || plan.Count == 0)
+                {
+                    if (_agent.PlanningFailed)
+                        GUILayout.Label(NoPlanHint(), _warn);
+                    else
+                        GUILayout.Label("   (no plan)", _body);
+                }
                 else
-                    GUILayout.Label("   (no plan)", _body);
+                {
+                    for (int i = 0; i < plan.Count; i++)
+                    {
+                        string marker = i == _agent.PlanIndex ? " > " : "   ";
+                        GUILayout.Label(marker + plan[i].Name + "  (cost " + plan[i].Cost + ")", _body);
+                    }
+                }
             }
             else
             {
-                for (int i = 0; i < plan.Count; i++)
-                {
-                    string marker = i == _agent.PlanIndex ? " > " : "   ";
-                    GUILayout.Label(marker + plan[i].Name + "  (cost " + plan[i].Cost + ")", _body);
-                }
+                GUILayout.Label("Status: " + _fsm.StatusLine, _fsm.IsStuck ? _warn : _body);
+                GUILayout.Space(8);
+                GUILayout.Label("Route: hard-coded  shed -> tree -> stockpile", _body);
+                GUILayout.Label("No planning, no buy-axe fallback wired.", _body);
+                if (_fsm.IsStuck)
+                    GUILayout.Label("Press [M] to hand the same situation to GOAP.", _warn);
             }
 
             GUILayout.Space(8);
@@ -327,6 +387,7 @@ namespace GOAP
             GUILayout.Label("   [S] steal axe + empty shed", _body);
             GUILayout.Label("   [R] restock shed   [G] give gold", _body);
             GUILayout.Label("   [B] break the agent's axe", _body);
+            GUILayout.Label("   [M] brain: " + (_useGoap ? "GOAP" : "FSM") + "  (switch)", _body);
             GUILayout.Label("   [V] plan-search tree: " + (_showSearch ? "ON" : "OFF"), _body);
 
             if (!string.IsNullOrEmpty(_lastEvent))
@@ -338,7 +399,26 @@ namespace GOAP
             GUILayout.EndArea();
 
             if (_showSearch)
-                DrawSearchTree(panelRect.xMax, hudScale);
+            {
+                if (_useGoap)
+                    DrawSearchTree(panelRect.xMax, hudScale);
+                else
+                    DrawSearchNote(panelRect.xMax, hudScale,
+                        "Plan-search tree is GOAP-only — the FSM does not search. Press [M] to switch to the GOAP brain.");
+            }
+        }
+
+        // Small placeholder panel shown in FSM mode where the search tree would be.
+        private void DrawSearchNote(float leftX, float hudScale, string message)
+        {
+            Rect area = new Rect(leftX + 12f, 12f, Screen.width - leftX - 24f, 96f * hudScale);
+            if (area.width < 260f)
+                return;
+            FillRect(area, new Color(0f, 0f, 0f, 0.55f));
+            GUI.Label(new Rect(area.x + 12f, area.y + 10f, area.width - 24f, 30f * hudScale),
+                      "Plan search — A* over world-states", _body);
+            GUIStyle wrap = new GUIStyle(_small) { wordWrap = true };
+            GUI.Label(new Rect(area.x + 12f, area.y + 42f * hudScale, area.width - 24f, 48f * hudScale), message, wrap);
         }
 
         private void DrawWorldLabels()
