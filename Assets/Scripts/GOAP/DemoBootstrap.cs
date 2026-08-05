@@ -249,7 +249,7 @@ namespace GOAP
 
         private GUIStyle _h1, _body, _tag, _nodeTitle, _small, _warn;
         private Texture2D _panelTex, _whiteTex;
-        private bool _showSearch = true; // toggled with [V]
+        private bool _showSearch; // off by default; toggled with [V]
 
         private void OnGUI()
         {
