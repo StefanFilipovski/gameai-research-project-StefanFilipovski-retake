@@ -221,6 +221,22 @@ namespace GOAP
             _agent.Replan("player broke the axe");
         }
 
+        // Explains *why* the current goal is unreachable, in scenario terms, so a "no plan"
+        // dead-end reads as intentional rather than looking like the demo froze.
+        private string NoPlanHint()
+        {
+            bool hasAxe = _agent.State.Get(HasAxe);
+            bool hasWood = _agent.State.Get(HasWood);
+            bool axeInShed = _agent.State.Get(AxeInShed);
+            bool hasGold = _agent.State.Get(HasGold);
+
+            if (!hasWood && !hasAxe && !axeInShed && !hasGold)
+                return "No plan: can't get an axe — the shed is empty and there's no gold. " +
+                       "Press [R] to restock the shed or [G] to give gold.";
+
+            return "No plan for the current goal (the goal is currently unreachable).";
+        }
+
         // ---------------------------------------------------------------- helpers + HUD
 
         private static void Colorize(GameObject go, Color color)
@@ -231,7 +247,7 @@ namespace GOAP
                 r.material.color = color;
         }
 
-        private GUIStyle _h1, _body, _tag, _nodeTitle, _small;
+        private GUIStyle _h1, _body, _tag, _nodeTitle, _small, _warn;
         private Texture2D _panelTex, _whiteTex;
         private bool _showSearch = true; // toggled with [V]
 
@@ -252,6 +268,8 @@ namespace GOAP
                 _nodeTitle.normal.textColor = Color.white;
                 _small = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(12 * hudScale) };
                 _small.normal.textColor = new Color(0.88f, 0.88f, 0.88f);
+                _warn = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(16 * hudScale), wordWrap = true };
+                _warn.normal.textColor = new Color(1f, 0.82f, 0.25f); // amber
 
                 _panelTex = new Texture2D(1, 1);
                 _panelTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.65f));
@@ -283,7 +301,10 @@ namespace GOAP
             IReadOnlyList<GoapAction> plan = _agent.CurrentPlan;
             if (plan == null || plan.Count == 0)
             {
-                GUILayout.Label("   (no plan)", _body);
+                if (_agent.PlanningFailed)
+                    GUILayout.Label(NoPlanHint(), _warn);
+                else
+                    GUILayout.Label("   (no plan)", _body);
             }
             else
             {

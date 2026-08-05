@@ -46,6 +46,8 @@ namespace GOAP
 
         // ---- Exposed for the on-screen HUD ----
         public string StatusLine { get; private set; } = "Booting...";
+        // True when the agent has an active goal but the planner could not find any plan for it.
+        public bool PlanningFailed { get; private set; }
         public GoapGoal ActiveGoal => _activeGoal;
         public IReadOnlyList<GoapAction> CurrentPlan => _plan;
         public int PlanIndex => _planIndex;
@@ -134,6 +136,7 @@ namespace GOAP
             if (_activeGoal == null)
             {
                 StatusLine = "Idle — all goals satisfied";
+                PlanningFailed = false;
                 _plan = null;
                 return;
             }
@@ -142,6 +145,7 @@ namespace GOAP
             if (plan == null || plan.Count == 0)
             {
                 StatusLine = "No plan found for goal '" + _activeGoal.Name + "'";
+                PlanningFailed = true;
                 if (VerboseLogging && !_loggedNoPlan)
                 {
                     Debug.LogWarning("[GOAP] No valid plan for goal '" + _activeGoal.Name +
@@ -152,6 +156,7 @@ namespace GOAP
                 return;
             }
 
+            PlanningFailed = false;
             _loggedNoPlan = false;
             if (VerboseLogging)
                 Debug.Log("[GOAP] Planned for goal '" + _activeGoal.Name + "': " +
