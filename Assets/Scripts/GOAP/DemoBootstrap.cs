@@ -127,6 +127,9 @@ namespace GOAP
                 .At(_stockpile).TakesSeconds(1.0f));
 
             _agent.Goals.Add(new GoapGoal("DeliverWood", 5f).Want(WoodDelivered, true));
+
+            // Have the planner keep its A* search tree so the [V] visualizer can draw it.
+            _agent.RecordSearch = true;
         }
 
         // ---------------------------------------------------------------- interaction + loop
@@ -173,12 +176,14 @@ namespace GOAP
                 else if (kb.rKey.wasPressedThisFrame) RestockShed();
                 else if (kb.gKey.wasPressedThisFrame) GiveGold();
                 else if (kb.bKey.wasPressedThisFrame) BreakAxe();
+                else if (kb.vKey.wasPressedThisFrame) _showSearch = !_showSearch;
             }
 #elif ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(KeyCode.S)) StealAxe();
             else if (Input.GetKeyDown(KeyCode.R)) RestockShed();
             else if (Input.GetKeyDown(KeyCode.G)) GiveGold();
             else if (Input.GetKeyDown(KeyCode.B)) BreakAxe();
+            else if (Input.GetKeyDown(KeyCode.V)) _showSearch = !_showSearch;
 #endif
         }
 
@@ -226,8 +231,9 @@ namespace GOAP
                 r.material.color = color;
         }
 
-        private GUIStyle _h1, _body, _tag;
-        private Texture2D _panelTex;
+        private GUIStyle _h1, _body, _tag, _nodeTitle, _small;
+        private Texture2D _panelTex, _whiteTex;
+        private bool _showSearch = true; // toggled with [V]
 
         private void OnGUI()
         {
@@ -242,10 +248,18 @@ namespace GOAP
                 _body.normal.textColor = Color.white;
                 _tag = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(15 * hudScale), alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
                 _tag.normal.textColor = Color.white;
+                _nodeTitle = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(14 * hudScale), fontStyle = FontStyle.Bold };
+                _nodeTitle.normal.textColor = Color.white;
+                _small = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(12 * hudScale) };
+                _small.normal.textColor = new Color(0.88f, 0.88f, 0.88f);
 
                 _panelTex = new Texture2D(1, 1);
                 _panelTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.65f));
                 _panelTex.Apply();
+
+                _whiteTex = new Texture2D(1, 1);
+                _whiteTex.SetPixel(0, 0, Color.white);
+                _whiteTex.Apply();
             }
 
             DrawWorldLabels();
@@ -292,6 +306,7 @@ namespace GOAP
             GUILayout.Label("   [S] steal axe + empty shed", _body);
             GUILayout.Label("   [R] restock shed   [G] give gold", _body);
             GUILayout.Label("   [B] break the agent's axe", _body);
+            GUILayout.Label("   [V] plan-search tree: " + (_showSearch ? "ON" : "OFF"), _body);
 
             if (!string.IsNullOrEmpty(_lastEvent))
             {
@@ -300,6 +315,9 @@ namespace GOAP
             }
 
             GUILayout.EndArea();
+
+            if (_showSearch)
+                DrawSearchTree(panelRect.xMax, hudScale);
         }
 
         private void DrawWorldLabels()
@@ -331,6 +349,139 @@ namespace GOAP
                                 size.y + padY * 2f);
             GUI.DrawTexture(box, _panelTex);
             GUI.Label(box, gc, _tag);
+        }
+
+        // ---------------------------------------------------------------- plan-search visualizer
+
+        // Node colours by role in the A* search.
+        private static readonly Color ColGoal = new Color(0.35f, 0.95f, 0.45f); // reached the goal
+        private static readonly Color ColPlan = new Color(0.20f, 0.70f, 0.30f); // on the chosen plan
+        private static readonly Color ColExpanded = new Color(0.30f, 0.55f, 0.95f); // popped/expanded
+        private static readonly Color ColFrontier = new Color(0.50f, 0.50f, 0.55f); // generated, not expanded
+
+        /// <summary>
+        /// Draws the planner's last A* search as a left-to-right tree: one box per world-state it
+        /// generated (columns = search depth = number of actions applied), edges = actions, and the
+        /// chosen plan highlighted. This is the state-space analogue of a grid pathfinding debug view.
+        /// </summary>
+        private void DrawSearchTree(float leftX, float hudScale)
+        {
+            IReadOnlyList<GoapPlanner.SearchNode> trace = _agent.LastSearch;
+
+            Rect area = new Rect(leftX + 12f, 12f, Screen.width - leftX - 24f, Screen.height - 24f);
+            if (area.width < 260f)
+                return; // window too narrow to draw a useful tree
+            FillRect(area, new Color(0f, 0f, 0f, 0.55f));
+            GUI.Label(new Rect(area.x + 12f, area.y + 8f, area.width - 24f, 30f * hudScale),
+                      "Plan search — A* over world-states", _body);
+
+            if (trace == null || trace.Count == 0)
+            {
+                GUI.Label(new Rect(area.x + 12f, area.y + 40f * hudScale, area.width - 24f, 30f * hudScale),
+                          "(no search recorded yet)", _small);
+                return;
+            }
+
+            // --- Layout: column by depth, stacked rows within each depth ---
+            int maxDepth = 0;
+            foreach (GoapPlanner.SearchNode n in trace)
+                if (n.Depth > maxDepth) maxDepth = n.Depth;
+
+            float top = area.y + 44f * hudScale;
+            float colW = (area.width - 24f) / (maxDepth + 1);
+            float nodeW = Mathf.Min(colW - 14f, 220f * hudScale);
+            float nodeH = 58f * hudScale;
+            float rowGap = 12f * hudScale;
+
+            Dictionary<int, Rect> rectById = new Dictionary<int, Rect>();
+            Dictionary<int, int> rowUsed = new Dictionary<int, int>();
+            foreach (GoapPlanner.SearchNode n in trace)
+            {
+                int row = rowUsed.TryGetValue(n.Depth, out int c) ? c : 0;
+                rowUsed[n.Depth] = row + 1;
+                float x = area.x + 12f + n.Depth * colW;
+                float y = top + row * (nodeH + rowGap);
+                rectById[n.Id] = new Rect(x, y, nodeW, nodeH);
+            }
+
+            // --- Edges (drawn first, behind the nodes) ---
+            foreach (GoapPlanner.SearchNode n in trace)
+            {
+                if (n.ParentId < 0 || !rectById.ContainsKey(n.ParentId))
+                    continue;
+                Rect pr = rectById[n.ParentId];
+                Rect cr = rectById[n.Id];
+                Vector2 a = new Vector2(pr.xMax, pr.center.y);
+                Vector2 b = new Vector2(cr.x, cr.center.y);
+                GuiLine(a, b, n.OnFinalPlan ? 3f : 1.5f, n.OnFinalPlan ? ColPlan : new Color(1f, 1f, 1f, 0.25f));
+            }
+
+            // --- Nodes ---
+            foreach (GoapPlanner.SearchNode n in trace)
+            {
+                Rect r = rectById[n.Id];
+                Color border = n.SatisfiesGoal ? ColGoal
+                             : n.OnFinalPlan ? ColPlan
+                             : n.ExpandedOrder >= 0 ? ColExpanded
+                             : ColFrontier;
+                FillRect(Expand(r, 2f), border);
+                FillRect(r, new Color(0.06f, 0.06f, 0.08f, 0.96f));
+
+                float pad = 8f;
+                string title = n.ActionName ?? "START";
+                if (n.SatisfiesGoal) title += "  (GOAL)";
+                GUI.Label(new Rect(r.x + pad, r.y + 3f, r.width - pad * 2f, 20f * hudScale), title, _nodeTitle);
+
+                string fgh = "f=" + Fmt(n.F) + "  g=" + Fmt(n.G) + "  h=" + Fmt(n.H);
+                string order = n.ExpandedOrder >= 0 ? "expanded #" + n.ExpandedOrder : "frontier";
+                GUI.Label(new Rect(r.x + pad, r.y + 3f + 19f * hudScale, r.width - pad * 2f, 18f * hudScale), fgh + "   " + order, _small);
+                GUI.Label(new Rect(r.x + pad, r.y + 3f + 36f * hudScale, r.width - pad * 2f, 18f * hudScale), n.TrueFacts, _small);
+            }
+
+            // --- Legend ---
+            float ly = area.yMax - 26f * hudScale;
+            DrawLegendChip(area.x + 12f, ly, hudScale, ColPlan, "chosen plan");
+            DrawLegendChip(area.x + 12f + 150f * hudScale, ly, hudScale, ColExpanded, "expanded");
+            DrawLegendChip(area.x + 12f + 290f * hudScale, ly, hudScale, ColFrontier, "frontier");
+            DrawLegendChip(area.x + 12f + 420f * hudScale, ly, hudScale, ColGoal, "goal reached");
+        }
+
+        private void DrawLegendChip(float x, float y, float scale, Color color, string label)
+        {
+            FillRect(new Rect(x, y, 14f * scale, 14f * scale), color);
+            GUI.Label(new Rect(x + 20f * scale, y - 2f * scale, 140f * scale, 20f * scale), label, _small);
+        }
+
+        private static string Fmt(float v)
+        {
+            return v.ToString("0.#");
+        }
+
+        private void FillRect(Rect r, Color color)
+        {
+            Color old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(r, _whiteTex);
+            GUI.color = old;
+        }
+
+        private static Rect Expand(Rect r, float m)
+        {
+            return new Rect(r.x - m, r.y - m, r.width + 2f * m, r.height + 2f * m);
+        }
+
+        // Draws a line between two screen points by rotating a 1px texture — IMGUI has no line primitive.
+        private void GuiLine(Vector2 a, Vector2 b, float width, Color color)
+        {
+            Matrix4x4 saved = GUI.matrix;
+            float angle = Mathf.Atan2(b.y - a.y, b.x - a.x) * Mathf.Rad2Deg;
+            float length = Vector2.Distance(a, b);
+            GUIUtility.RotateAroundPivot(angle, a);
+            Color old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(a.x, a.y - width / 2f, length, width), _whiteTex);
+            GUI.color = old;
+            GUI.matrix = saved;
         }
     }
 }
