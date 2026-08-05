@@ -50,6 +50,15 @@ namespace GOAP
         public IReadOnlyList<GoapAction> CurrentPlan => _plan;
         public int PlanIndex => _planIndex;
 
+        // ---- Exposed for the plan-search visualizer ----
+        // When on, the planner records its A* search tree each time it plans.
+        public bool RecordSearch
+        {
+            get => _planner.RecordSearch;
+            set => _planner.RecordSearch = value;
+        }
+        public IReadOnlyList<GoapPlanner.SearchNode> LastSearch => _planner.LastSearch;
+
         private void Update()
         {
             if (_phase == Phase.Idle)
