@@ -1,8 +1,8 @@
 # Goal-Oriented Action Planning (GOAP) — Game AI Research
 
 **Author:** Stefan Filipovski
-**Engine:** Unity (Built-in Render Pipeline), C#
-**Repository:** _<add your GitHub Classroom URL here>_
+**Engine:** Unity 6 (6000.3, Built-in Render Pipeline), C#
+**Repository:** https://github.com/StefanFilipovski/gameai-research-project-StefanFilipovski-retake
 
 > A small, self-contained Unity demo of an agent that *plans* its own behaviour with A\*
 > instead of following a hand-authored script. A woodcutter is given a goal — "deliver wood"
@@ -183,8 +183,9 @@ A woodcutter (red capsule) works four sites built at runtime:
 - 🟨 **Stockpile** — deliver the wood
 
 The on-screen HUD shows, live: the **active goal**, the **current plan** with the running action
-marked `>`, the **world state**, and the interaction keys. Everything — ground, sites, agent,
-camera, light and HUD — is created in code by
+marked `>`, the **world state**, and the interaction keys. When a goal becomes unreachable the
+plan area turns into an **amber hint** explaining *why* and which key recovers it. Everything —
+ground, sites, agent, camera, light and HUD — is created in code by
 [`DemoBootstrap.cs`](Assets/Scripts/GOAP/DemoBootstrap.cs), so the project runs from an empty
 scene with a single component.
 
@@ -196,10 +197,51 @@ scene with a single component.
 | **R** | Restock the shed | Next plan prefers the cheap shed branch again |
 | **G** | Give the agent gold | Re-enables the buy-axe branch when the shed is empty |
 | **B** | Break the agent's axe | Agent must acquire a new axe before it can chop |
+| **V** | Toggle the plan-search visualizer | Shows/hides the live A\* search tree (see below) |
 
-Try this: press **S** while the agent walks to the shed and watch it reroute to the shop. Then
-press **S** again with no gold (`[B]` first, don't press `[G]`) to see it report *no plan* —
-the goal is genuinely unreachable.
+Try this: press **S** while the agent walks to the shed and watch it reroute to the shop. Then,
+with no gold left, press **B** to see it report an **amber "no plan" hint** — the goal is
+genuinely unreachable until you press **R** or **G**.
+
+---
+
+## Seeing the Search — the Plan-Search Visualizer
+
+Press **V** to overlay the planner's **last A\* search** as a left-to-right tree. This is the
+state-space analogue of the grid/flow-field debug views used for movement pathfinding — it makes
+the otherwise-invisible planning search concrete.
+
+<!-- TODO: insert visualizer.gif here — press [V], then [S] mid-walk, and show the tree redraw onto the BuyAxe branch -->
+
+- **Each box is one world-state** the planner generated. **Columns = search depth** (column 0 is
+  `START`, column 1 is after one action, and so on).
+- **Edges are actions.** The **thick green path** is the chosen plan.
+- Every box shows the action that produced it, its **`f / g / h`** values, whether it was
+  **`expanded #N`** (popped by A\* in that order) or still **`frontier`** (generated but not yet
+  expanded), and the facts true in that state.
+- **Colours:** green = chosen plan · blue = expanded · gray = frontier · bright green = goal reached.
+
+Because the tree is the *actual* recorded search (see `RecordSearch` / `SearchNode` in
+[`GoapPlanner.cs`](Assets/Scripts/GOAP/GoapPlanner.cs)), pressing **S** mid-walk visibly redraws
+it: the `GetAxeFromShed` branch disappears and the green path re-routes through `BuyAxe` at a
+higher `g`. You are watching A\* re-solve in world-state space in real time.
+
+## Debug Logging
+
+The agent prints a full plan/execute/replan trace to the Console (toggle with `VerboseLogging`
+on the agent). A typical order reads:
+
+```
+[GOAP] Planned for goal 'DeliverWood': GetAxeFromShed -> ChopWood -> DeliverWood  (total cost 6)
+[GOAP]   step 1/3: start 'GetAxeFromShed' (cost 2)  -> moving to Shed (free axe)
+[GOAP]   done 'GetAxeFromShed'  -> HasAxe=True, AxeInShed=False
+...
+[GOAP] Replan requested: player stole axe / emptied shed
+[GOAP] Planned for goal 'DeliverWood': BuyAxe -> ChopWood -> DeliverWood  (total cost 8)
+```
+
+The `cost 6 → cost 8` switch is the planner proving, in the log, that it re-evaluated and chose
+the new cheapest route.
 
 ---
 
@@ -224,28 +266,34 @@ Assets/Scripts/GOAP/
 ├── WorldState.cs     — symbolic facts; Satisfies / ApplyEffects / Key
 ├── GoapAction.cs     — preconditions, effects, cost + runtime target/duration
 ├── GoapGoal.cs       — desired world-state + priority
-├── GoapPlanner.cs    — A* over world-states  ← the core of the research
-├── GoapAgent.cs      — plan/execute FSM with live replanning
-└── DemoBootstrap.cs  — builds the scene, wires the woodcutter, draws the HUD
+├── GoapPlanner.cs    — A* over world-states (+ optional search recording)  ← the core
+├── GoapAgent.cs      — plan/execute FSM with live replanning + logging
+└── DemoBootstrap.cs  — builds the scene, wires the woodcutter, draws the HUD + visualizer
 ```
 
 **Key methods**
 - `GoapPlanner.Plan()` — A\* search returning the cheapest action sequence (or `null`)
+- `GoapPlanner.BuildTrace()` — snapshots the search into `SearchNode`s for the `[V]` visualizer
 - `WorldState.ApplyEffects()` — generates a successor node during the search
 - `GoapAgent.Update()` — the Idle→Moving→Performing FSM and the per-frame replan check
 - `GoapAgent.ChooseGoal()` — highest-priority unsatisfied goal
+- `DemoBootstrap.DrawSearchTree()` — renders the recorded A\* search as a node-link tree
 
 ---
 
 ## How to Run
 
-1. Install **Unity 2021.3 LTS or newer** (any version; the demo uses only built-in APIs and the
-   **Built-in Render Pipeline** — do *not* use URP/HDRP or the runtime-created materials will be
-   magenta).
-2. Create a new **3D (Built-in Render Pipeline)** project.
-3. Copy the `Assets/Scripts` folder into the project's `Assets`.
-4. In an empty scene, create an empty GameObject and add the **DemoBootstrap** component.
-5. Press **Play**. (A ready-to-run **release build** is also included in the hand-in.)
+This repository **is** a ready-to-open Unity project — clone it and open the folder in **Unity
+6 (6000.3.9f1 or compatible)** via Unity Hub, then open `Assets/Scenes/SampleScene` and press
+**Play**. It uses the **Built-in Render Pipeline** (not URP/HDRP, or the runtime-created
+materials would be magenta) and works with either input backend — the demo reads the **new Input
+System** when present (Unity 6 default) and falls back to the legacy Input Manager, so **no
+Player Settings changes are needed**.
+
+To rebuild from scratch instead: create a new **3D (Built-in Render Pipeline)** project, copy the
+`Assets/Scripts` folder into its `Assets`, add the **DemoBootstrap** component to an empty
+GameObject in a scene, and press Play. A ready-to-run **release build** is also included in the
+hand-in.
 
 ## Testing
 
