@@ -11,22 +11,26 @@ namespace GOAP
     /// press Play. It creates the scene, defines the woodcutter's actions and goal, applies the
     /// player's interactions to the world state, and draws the HUD and the plan-search visualizer.
     ///
-    /// Scenario — goal is WoodDelivered:
-    ///   GetAxeFromShed (needs an axe in the shed)  -> has axe   cost 2
-    ///   BuyAxe         (needs gold)                -> has axe   cost 4
-    ///   ChopWood       (needs an axe)              -> has wood  cost 3
-    ///   DeliverWood    (needs wood)                -> delivered cost 1
-    /// The planner prefers the shed (total 6) over buying (total 8), and re-plans onto the buy
-    /// branch if the shed is emptied mid-task.
+    /// Scenario — goal is PlanksDelivered:
+    ///   GetAxeFromShed (needs an axe in the shed)   -> has axe     cost 2
+    ///   BuyAxe         (needs gold)                 -> has axe     cost 4
+    ///   SharpenAxe     (needs an axe)               -> axe sharp   cost 1
+    ///   ChopLogs       (needs a sharp axe)          -> has logs    cost 3
+    ///   SawPlanks      (needs logs)                 -> has planks  cost 2
+    ///   DeliverPlanks  (needs planks)               -> delivered   cost 1
+    /// The cheapest plan is five actions long (total 9); acquiring the axe by buying instead costs
+    /// 11, so the planner only takes that branch when the shed is empty.
     /// </summary>
     public class DemoBootstrap : MonoBehaviour
     {
         // Fact names as constants so actions, goals and interactions cannot disagree by typo.
         private const string HasAxe = "HasAxe";
-        private const string HasWood = "HasWood";
+        private const string AxeSharp = "AxeSharp";
+        private const string HasLogs = "HasLogs";
+        private const string HasPlanks = "HasPlanks";
         private const string AxeInShed = "AxeInShed";
         private const string HasGold = "HasGold";
-        private const string WoodDelivered = "WoodDelivered";
+        private const string PlanksDelivered = "PlanksDelivered";
 
         private GoapAgent _agent;
         private FsmWoodcutter _fsm;
@@ -35,7 +39,7 @@ namespace GOAP
         private float _resetTimer;
         private string _lastEvent = "";
 
-        private Transform _tree, _shed, _shop, _stockpile;
+        private Transform _tree, _shed, _shop, _stockpile, _grindstone, _sawmill;
 
         private void Start()
         {
@@ -54,10 +58,13 @@ namespace GOAP
             ground.transform.localScale = new Vector3(2.4f, 1f, 2.4f);
             Colorize(ground, new Color(0.20f, 0.22f, 0.26f));
 
-            _tree = MakeSite("Tree", new Vector3(-6, 0.5f, 5), new Color(0.20f, 0.65f, 0.25f));
-            _shed = MakeSite("Shed", new Vector3(6, 0.5f, 5), new Color(0.55f, 0.38f, 0.20f));
-            _shop = MakeSite("Shop", new Vector3(6, 0.5f, -5), new Color(0.25f, 0.45f, 0.85f));
-            _stockpile = MakeSite("Stockpile", new Vector3(-6, 0.5f, -5), new Color(0.85f, 0.75f, 0.20f));
+            // Laid out roughly in the order the cheapest plan visits them.
+            _shed = MakeSite("Shed", new Vector3(8, 0.5f, 6), new Color(0.55f, 0.38f, 0.20f));
+            _grindstone = MakeSite("Grindstone", new Vector3(0, 0.5f, 8), new Color(0.60f, 0.60f, 0.66f));
+            _tree = MakeSite("Tree", new Vector3(-8, 0.5f, 6), new Color(0.20f, 0.65f, 0.25f));
+            _sawmill = MakeSite("Sawmill", new Vector3(-8, 0.5f, -2), new Color(0.75f, 0.45f, 0.75f));
+            _stockpile = MakeSite("Stockpile", new Vector3(-4, 0.5f, -8), new Color(0.85f, 0.75f, 0.20f));
+            _shop = MakeSite("Shop", new Vector3(8, 0.5f, -4), new Color(0.25f, 0.45f, 0.85f));
         }
 
         private void SetUpCameraAndLight()
@@ -103,11 +110,7 @@ namespace GOAP
 
             _agent = go.AddComponent<GoapAgent>();
 
-            _agent.State.Set(AxeInShed, true);
-            _agent.State.Set(HasGold, true);
-            _agent.State.Set(HasAxe, false);
-            _agent.State.Set(HasWood, false);
-            _agent.State.Set(WoodDelivered, false);
+            ResetForNewOrder();
 
             // Two ways to get an axe; the planner picks whichever valid route is cheapest.
             _agent.Actions.Add(new GoapAction("GetAxeFromShed", 2f)
@@ -118,22 +121,33 @@ namespace GOAP
                 .Pre(HasGold, true).Effect(HasAxe, true).Effect(HasGold, false)
                 .At(_shop).TakesSeconds(1.0f));
 
-            _agent.Actions.Add(new GoapAction("ChopWood", 3f)
-                .Pre(HasAxe, true).Effect(HasWood, true)
+            // The rest of the chain: each action's effect unlocks the next one's precondition.
+            _agent.Actions.Add(new GoapAction("SharpenAxe", 1f)
+                .Pre(HasAxe, true).Effect(AxeSharp, true)
+                .At(_grindstone).TakesSeconds(1.0f));
+
+            _agent.Actions.Add(new GoapAction("ChopLogs", 3f)
+                .Pre(HasAxe, true).Pre(AxeSharp, true).Effect(HasLogs, true)
                 .At(_tree).TakesSeconds(1.5f));
 
-            _agent.Actions.Add(new GoapAction("DeliverWood", 1f)
-                .Pre(HasWood, true).Effect(WoodDelivered, true).Effect(HasWood, false)
+            _agent.Actions.Add(new GoapAction("SawPlanks", 2f)
+                .Pre(HasLogs, true).Effect(HasPlanks, true).Effect(HasLogs, false)
+                .At(_sawmill).TakesSeconds(1.5f));
+
+            _agent.Actions.Add(new GoapAction("DeliverPlanks", 1f)
+                .Pre(HasPlanks, true).Effect(PlanksDelivered, true).Effect(HasPlanks, false)
                 .At(_stockpile).TakesSeconds(1.0f));
 
-            _agent.Goals.Add(new GoapGoal("DeliverWood", 5f).Want(WoodDelivered, true));
+            _agent.Goals.Add(new GoapGoal("DeliverPlanks", 5f).Want(PlanksDelivered, true));
             _agent.RecordSearch = true; // keep the A* search so [V] can draw it
 
             // The FSM brain shares the same world state and starts disabled; GOAP drives by default.
             _fsm = go.AddComponent<FsmWoodcutter>();
             _fsm.State = _agent.State;
             _fsm.Shed = _shed;
+            _fsm.Grindstone = _grindstone;
             _fsm.Tree = _tree;
+            _fsm.Sawmill = _sawmill;
             _fsm.Stockpile = _stockpile;
             _fsm.MoveSpeed = _agent.MoveSpeed;
             _fsm.enabled = false;
@@ -146,26 +160,34 @@ namespace GOAP
             HandleInput();
 
             // Issue a fresh order shortly after each delivery, restocking supplies so every cycle
-            // shows the full fetch-axe -> chop -> deliver route.
-            if (_agent.State.Get(WoodDelivered))
+            // shows the full five-action route.
+            if (_agent.State.Get(PlanksDelivered))
             {
                 _resetTimer += Time.deltaTime;
                 if (_resetTimer > 0.6f)
                 {
                     _resetTimer = 0f;
-                    _agent.State.Set(WoodDelivered, false);
-                    _agent.State.Set(HasWood, false);
-                    _agent.State.Set(HasAxe, false);
-                    _agent.State.Set(AxeInShed, true);
-                    _agent.State.Set(HasGold, true);
-                    _lastEvent = "New order: fetch an axe, chop, and deliver";
-                    Debug.Log("[GOAP][world] New order issued (axe reset, shed restocked, gold given)");
+                    ResetForNewOrder();
+                    _lastEvent = "New order: fetch an axe, sharpen, chop, saw, and deliver";
+                    Debug.Log("[GOAP][world] New order issued (tools returned, shed restocked, gold given)");
                 }
             }
             else
             {
                 _resetTimer = 0f;
             }
+        }
+
+        // The starting situation, also used to begin each new order.
+        private void ResetForNewOrder()
+        {
+            _agent.State.Set(AxeInShed, true);
+            _agent.State.Set(HasGold, true);
+            _agent.State.Set(HasAxe, false);
+            _agent.State.Set(AxeSharp, false);
+            _agent.State.Set(HasLogs, false);
+            _agent.State.Set(HasPlanks, false);
+            _agent.State.Set(PlanksDelivered, false);
         }
 
         // Reads the new Input System when present (Unity 6 default) and the legacy Input Manager
@@ -195,6 +217,7 @@ namespace GOAP
         private void StealAxe()
         {
             _agent.State.Set(HasAxe, false);
+            _agent.State.Set(AxeSharp, false); // a replacement axe will need sharpening again
             _agent.State.Set(AxeInShed, false);
             _lastEvent = "You stole the axe and emptied the shed!";
             Debug.Log("[GOAP][player] S: stole axe + emptied shed");
@@ -220,6 +243,7 @@ namespace GOAP
         private void BreakAxe()
         {
             _agent.State.Set(HasAxe, false);
+            _agent.State.Set(AxeSharp, false);
             _lastEvent = "The axe broke!";
             Debug.Log("[GOAP][player] B: broke the axe");
             ReplanIfGoap("player broke the axe");
@@ -268,7 +292,7 @@ namespace GOAP
 
             DrawWorldLabels();
 
-            const int hudRows = 17; // text rows the panel must fit
+            const int hudRows = 22; // text rows the panel must fit
             float panelW = Mathf.Max(380f, Screen.width * 0.30f);
             float panelH = Mathf.Min(Screen.height - 24f, 30f + hudRows * 26f * hudScale);
             Rect panelRect = new Rect(12, 12, panelW, panelH);
@@ -289,7 +313,9 @@ namespace GOAP
             GUILayout.Space(8);
             GUILayout.Label("World state:", _body);
             GUILayout.Label("   HasAxe=" + _agent.State.Get(HasAxe)
-                          + "   HasWood=" + _agent.State.Get(HasWood), _body);
+                          + "   AxeSharp=" + _agent.State.Get(AxeSharp), _body);
+            GUILayout.Label("   HasLogs=" + _agent.State.Get(HasLogs)
+                          + "   HasPlanks=" + _agent.State.Get(HasPlanks), _body);
             GUILayout.Label("   AxeInShed=" + _agent.State.Get(AxeInShed)
                           + "   HasGold=" + _agent.State.Get(HasGold), _body);
 
@@ -373,13 +399,27 @@ namespace GOAP
                 string marker = i == _agent.PlanIndex ? " > " : "   ";
                 GUILayout.Label(marker + plan[i].Name + "  (cost " + plan[i].Cost + ")", _body);
             }
+
+            DrawPlannerCost();
+        }
+
+        // What the last search actually cost — the price GOAP pays for being adaptive.
+        private void DrawPlannerCost()
+        {
+            GoapPlanner.PlanStats s = _agent.LastStats;
+            GUILayout.Space(8);
+            GUILayout.Label("Last search:  " + s.NodesExpanded + " expanded / " + s.NodesGenerated +
+                            " generated,  " + s.Microseconds.ToString("0.#") + " us", _small);
+            GUILayout.Label("Plan cost " + s.PlanCost + " over " + s.PlanLength +
+                            " actions   ·   replans so far: " + _agent.ReplanCount, _small);
         }
 
         private void DrawFsmStatus()
         {
             GUILayout.Label("Status: " + _fsm.StatusLine, _fsm.IsStuck ? _warn : _body);
             GUILayout.Space(8);
-            GUILayout.Label("Route: hard-coded  shed -> tree -> stockpile", _body);
+            GUILayout.Label("Route: hard-coded  shed -> grindstone -> tree", _body);
+            GUILayout.Label("                  -> sawmill -> stockpile", _body);
             GUILayout.Label("No planning, no buy-axe fallback wired.", _body);
             if (_fsm.IsStuck)
                 GUILayout.Label("Press [M] to hand the same situation to GOAP.", _warn);
@@ -387,10 +427,12 @@ namespace GOAP
 
         private void DrawWorldLabels()
         {
-            LabelWorld(_tree, "TREE");
             LabelWorld(_shed, "SHED");
-            LabelWorld(_shop, "SHOP");
+            LabelWorld(_grindstone, "GRINDSTONE");
+            LabelWorld(_tree, "TREE");
+            LabelWorld(_sawmill, "SAWMILL");
             LabelWorld(_stockpile, "STOCKPILE");
+            LabelWorld(_shop, "SHOP");
             LabelWorld(_agent.transform, "AGENT");
         }
 

@@ -4,9 +4,10 @@ namespace GOAP
 {
     /// <summary>
     /// A hand-authored finite state machine doing the same job as the GOAP agent, for the [M]
-    /// comparison. It is wired for one route — shed, tree, stockpile — which is what a designer
-    /// would author. There is deliberately no "buy an axe" state, so when the shed is emptied it
-    /// reaches a situation nobody anticipated and gets stuck; GOAP replans out of the same state.
+    /// comparison. It is wired for one route — shed, grindstone, tree, sawmill, stockpile — which
+    /// is what a designer would author. There is deliberately no "buy an axe" state, so when the
+    /// shed is emptied it reaches a situation nobody anticipated and gets stuck; GOAP replans out
+    /// of the same state. Note how many states this needs versus GOAP's six independent actions.
     /// </summary>
     public class FsmWoodcutter : MonoBehaviour
     {
@@ -16,14 +17,21 @@ namespace GOAP
         /// <summary>Shared with the GOAP agent, so player interactions affect whichever brain is active.</summary>
         public WorldState State;
 
-        public Transform Shed, Tree, Stockpile;
+        public Transform Shed, Grindstone, Tree, Sawmill, Stockpile;
 
         private const string HasAxe = "HasAxe";
-        private const string HasWood = "HasWood";
+        private const string AxeSharp = "AxeSharp";
+        private const string HasLogs = "HasLogs";
+        private const string HasPlanks = "HasPlanks";
         private const string AxeInShed = "AxeInShed";
-        private const string WoodDelivered = "WoodDelivered";
+        private const string PlanksDelivered = "PlanksDelivered";
 
-        private enum Step { ToShed, GetAxe, ToTree, Chop, ToStockpile, Deliver, WaitForNextOrder, Stuck }
+        private enum Step
+        {
+            ToShed, GetAxe, ToGrindstone, Sharpen, ToTree, Chop,
+            ToSawmill, Saw, ToStockpile, Deliver, WaitForNextOrder, Stuck
+        }
+
         private Step _step;
         private float _timer;
 
@@ -47,55 +55,94 @@ namespace GOAP
                     break;
 
                 case Step.GetAxe:
-                    _timer -= Time.deltaTime;
-                    if (_timer > 0f) break;
+                    if (!Wait()) break;
                     if (State.Get(AxeInShed))
                     {
                         State.Set(HasAxe, true);
                         State.Set(AxeInShed, false);
-                        _step = Step.ToTree;
-                        Say("go to the tree");
+                        _step = Step.ToGrindstone;
+                        Say("go to the grindstone");
                     }
                     else GetStuck("shed is empty — no authored 'buy axe' transition exists");
                     break;
 
+                case Step.ToGrindstone:
+                    if (MoveTo(Grindstone)) { _step = Step.Sharpen; _timer = 1.0f; Say("sharpen the axe"); }
+                    else Say("walk to grindstone");
+                    break;
+
+                case Step.Sharpen:
+                    if (!RequireAxe()) break;
+                    if (!Wait()) break;
+                    State.Set(AxeSharp, true);
+                    _step = Step.ToTree;
+                    Say("go to the tree");
+                    break;
+
                 case Step.ToTree:
-                    if (MoveTo(Tree)) { _step = Step.Chop; _timer = 1.5f; Say("chop wood"); }
+                    if (MoveTo(Tree)) { _step = Step.Chop; _timer = 1.5f; Say("chop logs"); }
                     else Say("walk to tree");
                     break;
 
                 case Step.Chop:
-                    if (!State.Get(HasAxe)) { GetStuck("no axe at the tree — FSM cannot replan to get one"); break; }
-                    _timer -= Time.deltaTime;
-                    if (_timer > 0f) break;
-                    State.Set(HasWood, true);
+                    if (!RequireAxe()) break;
+                    if (!Wait()) break;
+                    State.Set(HasLogs, true);
+                    _step = Step.ToSawmill;
+                    Say("go to the sawmill");
+                    break;
+
+                case Step.ToSawmill:
+                    if (MoveTo(Sawmill)) { _step = Step.Saw; _timer = 1.5f; Say("saw planks"); }
+                    else Say("walk to sawmill");
+                    break;
+
+                case Step.Saw:
+                    if (!Wait()) break;
+                    State.Set(HasPlanks, true);
+                    State.Set(HasLogs, false);
                     _step = Step.ToStockpile;
                     Say("go to the stockpile");
                     break;
 
                 case Step.ToStockpile:
-                    if (MoveTo(Stockpile)) { _step = Step.Deliver; _timer = 1.0f; Say("deliver wood"); }
+                    if (MoveTo(Stockpile)) { _step = Step.Deliver; _timer = 1.0f; Say("deliver planks"); }
                     else Say("walk to stockpile");
                     break;
 
                 case Step.Deliver:
-                    _timer -= Time.deltaTime;
-                    if (_timer > 0f) break;
-                    State.Set(WoodDelivered, true);
-                    State.Set(HasWood, false);
+                    if (!Wait()) break;
+                    State.Set(PlanksDelivered, true);
+                    State.Set(HasPlanks, false);
                     _step = Step.WaitForNextOrder;
                     Say("delivered — waiting for next order");
                     break;
 
                 case Step.WaitForNextOrder:
-                    // The demo clears WoodDelivered when it issues the next order.
-                    if (!State.Get(WoodDelivered)) { _step = Step.ToShed; Say("go to the shed"); }
+                    // The demo clears PlanksDelivered when it issues the next order.
+                    if (!State.Get(PlanksDelivered)) { _step = Step.ToShed; Say("go to the shed"); }
                     break;
 
                 case Step.Stuck:
                     // No authored recovery — that is the point of the comparison.
                     break;
             }
+        }
+
+        /// <summary>Counts down the current step's timer; true once it has elapsed.</summary>
+        private bool Wait()
+        {
+            _timer -= Time.deltaTime;
+            return _timer <= 0f;
+        }
+
+        /// <summary>The axe can be taken mid-route, and this FSM has no way to go and get another.</summary>
+        private bool RequireAxe()
+        {
+            if (State.Get(HasAxe))
+                return true;
+            GetStuck("the axe is gone — FSM cannot replan to get another");
+            return false;
         }
 
         /// <summary>Walks toward the target; returns true once it has arrived.</summary>

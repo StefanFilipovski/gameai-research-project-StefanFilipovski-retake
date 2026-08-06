@@ -13,8 +13,10 @@ class Program
         {
             new GoapAction("GetAxeFromShed", 2f).Pre("AxeInShed", true).Effect("HasAxe", true).Effect("AxeInShed", false),
             new GoapAction("BuyAxe", 4f).Pre("HasGold", true).Effect("HasAxe", true).Effect("HasGold", false),
-            new GoapAction("ChopWood", 3f).Pre("HasAxe", true).Effect("HasWood", true),
-            new GoapAction("DeliverWood", 1f).Pre("HasWood", true).Effect("WoodDelivered", true).Effect("HasWood", false),
+            new GoapAction("SharpenAxe", 1f).Pre("HasAxe", true).Effect("AxeSharp", true),
+            new GoapAction("ChopLogs", 3f).Pre("HasAxe", true).Pre("AxeSharp", true).Effect("HasLogs", true),
+            new GoapAction("SawPlanks", 2f).Pre("HasLogs", true).Effect("HasPlanks", true).Effect("HasLogs", false),
+            new GoapAction("DeliverPlanks", 1f).Pre("HasPlanks", true).Effect("PlanksDelivered", true).Effect("HasPlanks", false),
         };
     }
 
@@ -25,6 +27,7 @@ class Program
     }
 
     static int failures = 0;
+
     static void Check(string label, string got, string expected)
     {
         bool ok = got == expected;
@@ -35,36 +38,56 @@ class Program
     static void Main()
     {
         var planner = new GoapPlanner();
-        var goal = new GoapGoal("DeliverWood", 5f).Want("WoodDelivered", true);
+        var goal = new GoapGoal("DeliverPlanks", 5f).Want("PlanksDelivered", true);
 
-        // 1. Axe in shed + gold -> take the CHEAP shed branch (2+3+1=6) not buy (4+3+1=8).
+        // 1. Full chain from nothing: the planner must find all five steps, preferring the cheap shed.
         var s1 = new WorldState();
         s1.Set("AxeInShed", true); s1.Set("HasGold", true);
-        Check("shed available -> use shed", PlanStr(planner.Plan(s1, goal, BuildActions())),
-              "GetAxeFromShed -> ChopWood -> DeliverWood");
+        Check("full chain via shed", PlanStr(planner.Plan(s1, goal, BuildActions())),
+              "GetAxeFromShed -> SharpenAxe -> ChopLogs -> SawPlanks -> DeliverPlanks");
 
-        // 2. Shed empty, has gold -> must buy the axe.
+        // 2. Shed empty -> the only route to an axe is buying one.
         var s2 = new WorldState();
         s2.Set("AxeInShed", false); s2.Set("HasGold", true);
         Check("shed empty -> buy axe", PlanStr(planner.Plan(s2, goal, BuildActions())),
-              "BuyAxe -> ChopWood -> DeliverWood");
+              "BuyAxe -> SharpenAxe -> ChopLogs -> SawPlanks -> DeliverPlanks");
 
-        // 3. Already has an axe -> skip acquiring one entirely.
+        // 3. Already holding a sharp axe -> skip both acquisition and sharpening.
         var s3 = new WorldState();
-        s3.Set("HasAxe", true);
-        Check("already has axe -> just chop+deliver", PlanStr(planner.Plan(s3, goal, BuildActions())),
-              "ChopWood -> DeliverWood");
+        s3.Set("HasAxe", true); s3.Set("AxeSharp", true);
+        Check("sharp axe in hand -> chop onward", PlanStr(planner.Plan(s3, goal, BuildActions())),
+              "ChopLogs -> SawPlanks -> DeliverPlanks");
 
-        // 4. No axe, no gold, empty shed -> IMPOSSIBLE, planner must return null.
+        // 4. Carrying planks already -> one action is enough, regardless of tools.
         var s4 = new WorldState();
-        s4.Set("AxeInShed", false); s4.Set("HasGold", false);
-        Check("no way to get axe -> null plan", PlanStr(planner.Plan(s4, goal, BuildActions())), "NULL");
+        s4.Set("HasPlanks", true);
+        Check("planks in hand -> just deliver", PlanStr(planner.Plan(s4, goal, BuildActions())),
+              "DeliverPlanks");
 
-        // 5. Goal already satisfied -> empty plan.
+        // 5. No axe, no gold, empty shed -> the goal is genuinely unreachable.
         var s5 = new WorldState();
-        s5.Set("WoodDelivered", true);
-        var p5 = planner.Plan(s5, goal, BuildActions());
-        Check("goal already met -> empty plan", p5 != null ? "EMPTY(" + p5.Count + ")" : "NULL", "EMPTY(0)");
+        s5.Set("AxeInShed", false); s5.Set("HasGold", false);
+        Check("no way to get an axe -> null plan", PlanStr(planner.Plan(s5, goal, BuildActions())), "NULL");
+
+        // 6. Goal already satisfied -> nothing to do.
+        var s6 = new WorldState();
+        s6.Set("PlanksDelivered", true);
+        var p6 = planner.Plan(s6, goal, BuildActions());
+        Check("goal already met -> empty plan", p6 != null ? "EMPTY(" + p6.Count + ")" : "NULL", "EMPTY(0)");
+
+        // 7. The chosen plan must be the cheapest one, not merely a valid one.
+        var s7 = new WorldState();
+        s7.Set("AxeInShed", true); s7.Set("HasGold", true);
+        var p7 = planner.Plan(s7, goal, BuildActions());
+        float cost = 0f;
+        foreach (var a in p7) cost += a.Cost;
+        Check("cheapest plan costs 9 (shed 2, not buy 4)", cost.ToString(), "9");
+
+        // 8. Stats are reported for the search that just ran.
+        Check("stats recorded for last search",
+              planner.LastStats.Found && planner.LastStats.NodesExpanded > 0 &&
+              planner.LastStats.PlanLength == 5 ? "ok" : "missing",
+              "ok");
 
         Console.WriteLine(failures == 0 ? "\nALL TESTS PASSED" : "\n" + failures + " TEST(S) FAILED");
         Environment.Exit(failures == 0 ? 0 : 1);
