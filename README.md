@@ -54,7 +54,7 @@ different brains** and break them both. Press **M** to swap between:
 
 - **GOAP** — [`GoapAgent.cs`](Assets/Scripts/GOAP/GoapAgent.cs) + the planner, and
 - **a hand-authored FSM** — [`FsmWoodcutter.cs`](Assets/Scripts/GOAP/FsmWoodcutter.cs), wired for
-  exactly the route a designer would author: `shed → tree → stockpile`.
+  exactly the route a designer would author: `shed → grindstone → tree → sawmill → stockpile`.
 
 <!-- TODO: insert fsm-vs-goap.gif here — FSM runs fine, [S] gets it stuck, [M] lets GOAP rescue the same state -->
 
@@ -63,8 +63,10 @@ difference only appears when the world stops matching the script:
 
 | | Hand-authored FSM | GOAP |
 |---|---|---|
+| Author writes | 12 states wired in a fixed order | 6 independent actions, no ordering |
 | Happy path | ✅ works perfectly | ✅ works perfectly |
 | Shed emptied mid-task (**S**) | ❌ **stuck** — no "shed is empty" transition was ever authored | ✅ re-plans onto `BuyAxe` |
+| Axe taken at the tree (**B**) | ❌ **stuck** — cannot go back for another | ✅ re-plans from wherever it is |
 | To fix the FSM | write a new state + wire every transition into it | *nothing* — the `BuyAxe` action already existed |
 
 The key detail: **the [M] toggle swaps the brain in place** and leaves the world state untouched.
@@ -111,10 +113,12 @@ boolean **facts**:
 
 ```
 HasAxe = false
-HasWood = false
+AxeSharp = false
+HasLogs = false
+HasPlanks = false
 AxeInShed = true
 HasGold = true
-WoodDelivered = false
+PlanksDelivered = false
 ```
 
 A `WorldState` is just a snapshot of those facts (`Dictionary<string,bool>`). It offers three
@@ -134,18 +138,25 @@ Each action carries a **symbolic** half (for the planner) and a **runtime** half
 |---|---|---|---|
 | `GetAxeFromShed` | `AxeInShed` | `HasAxe`, `¬AxeInShed` | 2 |
 | `BuyAxe` | `HasGold` | `HasAxe`, `¬HasGold` | 4 |
-| `ChopWood` | `HasAxe` | `HasWood` | 3 |
-| `DeliverWood` | `HasWood` | `WoodDelivered`, `¬HasWood` | 1 |
+| `SharpenAxe` | `HasAxe` | `AxeSharp` | 1 |
+| `ChopLogs` | `HasAxe`, `AxeSharp` | `HasLogs` | 3 |
+| `SawPlanks` | `HasLogs` | `HasPlanks`, `¬HasLogs` | 2 |
+| `DeliverPlanks` | `HasPlanks` | `PlanksDelivered`, `¬HasPlanks` | 1 |
 
 The runtime half is just a `Transform` to walk to and a `Duration` to spend performing it once
 there. **Cost is how you bias the AI**: fetching a free axe from the shed (2) is cheaper than
 buying one (4), so given the choice the planner always prefers the shed.
 
+Note that **no action mentions any other action**. `SawPlanks` does not know that `ChopLogs`
+exists — it only declares that it needs `HasLogs`. The five-step chain below is discovered by the
+search purely from matching effects to preconditions, which is why adding a seventh action needs
+no edits to the existing six.
+
 ### 3. Goals — [`GoapGoal.cs`](Assets/Scripts/GOAP/GoapGoal.cs)
 
 A goal is a desired world-state plus a **priority**. An agent can hold several; each frame it
 picks the highest-priority goal that is not already satisfied and plans toward it. Here there is
-one goal — `WoodDelivered = true` — but the machinery supports many.
+one goal — `PlanksDelivered = true` — but the machinery supports many.
 
 ---
 
@@ -166,16 +177,32 @@ one goal — `WoodDelivered = true` — but the machinery supports many.
 well-formed action fixes at most one goal fact, `h` never overestimates the true remaining cost,
 so it is **admissible** and A\* returns an **optimal (cheapest) plan**.
 
-Worked example — start with `AxeInShed = true`, `HasGold = true`, goal `WoodDelivered`:
+Worked example — start with `AxeInShed = true`, `HasGold = true`, goal `PlanksDelivered`:
 
 ```
-GetAxeFromShed (2) → ChopWood (3) → DeliverWood (1)   total cost 6   ✅ chosen
-BuyAxe        (4) → ChopWood (3) → DeliverWood (1)   total cost 8   ❌ more expensive
+GetAxeFromShed (2) → SharpenAxe (1) → ChopLogs (3) → SawPlanks (2) → DeliverPlanks (1)   cost 9   ✅ chosen
+BuyAxe         (4) → SharpenAxe (1) → ChopLogs (3) → SawPlanks (2) → DeliverPlanks (1)   cost 11  ❌ dearer
 ```
 
 Empty the shed and the first branch's precondition disappears, so the planner is forced onto the
 buy branch. This exact behaviour is covered by the automated planner tests (see
 [Testing](#testing)).
+
+### What the search costs
+
+Because adaptivity is bought with runtime CPU, the demo **measures** it. The HUD reports the
+last search live, and the same numbers go to the Console:
+
+```
+Last search:  6 expanded / 11 generated,  38.4 us
+Plan cost 9 over 5 actions   ·   replans so far: 3
+```
+
+A full five-action plan is found in **tens of microseconds** from a handful of node expansions.
+That is the honest answer to "isn't searching every time expensive?" — at this state-space size
+it is cheap enough to re-run whenever the world changes, which is exactly what replanning does.
+The cost grows with the number of *actions* and the *plan depth*, not with the size of the level,
+so keeping the symbolic state small is what keeps GOAP affordable.
 
 ---
 
@@ -204,12 +231,14 @@ adaptive behaviour falls out of the search.
 
 <!-- TODO: insert overview.gif here — the full chop→deliver loop with the HUD visible -->
 
-A woodcutter (red capsule) works four sites built at runtime:
+A woodcutter (red capsule) works six sites built at runtime:
 
-- 🟩 **Tree** — chop wood here (needs an axe)
 - 🟫 **Shed** — pick up a free axe (cheap)
 - 🟦 **Shop** — buy an axe (expensive)
-- 🟨 **Stockpile** — deliver the wood
+- ⬜ **Grindstone** — sharpen the axe
+- 🟩 **Tree** — chop logs (needs a sharp axe)
+- 🟪 **Sawmill** — saw logs into planks
+- 🟨 **Stockpile** — deliver the planks
 
 The on-screen HUD shows, live: the **active goal**, the **current plan** with the running action
 marked `>`, the **world state**, and the interaction keys. When a goal becomes unreachable the
@@ -262,16 +291,18 @@ The agent prints a full plan/execute/replan trace to the Console (toggle with `V
 on the agent). A typical order reads:
 
 ```
-[GOAP] Planned for goal 'DeliverWood': GetAxeFromShed -> ChopWood -> DeliverWood  (total cost 6)
-[GOAP]   step 1/3: start 'GetAxeFromShed' (cost 2)  -> moving to Shed (free axe)
+[GOAP] Planned for goal 'DeliverPlanks': GetAxeFromShed -> SharpenAxe -> ChopLogs -> SawPlanks
+       -> DeliverPlanks  (cost 9, expanded 6/11 states in 38.4 us)
+[GOAP]   step 1/5: start 'GetAxeFromShed' (cost 2)  -> moving to Shed
 [GOAP]   done 'GetAxeFromShed'  -> HasAxe=True, AxeInShed=False
 ...
 [GOAP] Replan requested: player stole axe / emptied shed
-[GOAP] Planned for goal 'DeliverWood': BuyAxe -> ChopWood -> DeliverWood  (total cost 8)
+[GOAP] Planned for goal 'DeliverPlanks': BuyAxe -> SharpenAxe -> ChopLogs -> SawPlanks
+       -> DeliverPlanks  (cost 11, expanded 5/9 states in 31.7 us)
 ```
 
-The `cost 6 → cost 8` switch is the planner proving, in the log, that it re-evaluated and chose
-the new cheapest route.
+The `cost 9 → cost 11` switch is the planner proving, in the log, that it re-evaluated and chose
+the new cheapest route now that the cheap one is gone.
 
 ---
 
@@ -329,10 +360,18 @@ hand-in.
 ## Testing
 
 The pure-C# core (`WorldState`, `GoapAction`, `GoapGoal`, `GoapPlanner`) has no Unity
-dependencies and is covered by a small headless test harness that asserts the planner:
-picks the cheap shed branch over buying, falls back to buying when the shed is emptied, skips
-axe-acquisition when already armed, returns `null` when the goal is impossible, and an empty plan
-when it is already satisfied. See `Tests/` in the hand-in.
+dependencies, so it is covered by a headless test harness in `Tests/` that compiles those four
+files directly and runs without the editor:
+
+```bash
+dotnet run --project Tests
+```
+
+Its eight checks assert that the planner finds the full five-action chain, falls back to `BuyAxe`
+when the shed is emptied, skips steps it no longer needs (a sharp axe in hand, or planks already
+carried), returns `null` when the goal is genuinely unreachable, returns an empty plan when the
+goal already holds, picks the **cheapest** plan rather than merely a valid one, and reports search
+statistics.
 
 ---
 
