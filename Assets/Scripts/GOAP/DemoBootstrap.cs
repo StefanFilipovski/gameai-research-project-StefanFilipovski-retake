@@ -281,86 +281,191 @@ namespace GOAP
 
         // ---------------------------------------------------------------- HUD
 
-        private GUIStyle _h1, _body, _tag, _nodeTitle, _small, _smallWrap, _warn;
+        private enum HudText { Title, Body, Small, Warn }
+
+        private struct HudLine
+        {
+            public string Text;
+            public HudText Kind;
+            public float GapBefore;
+        }
+
+        private class HudStyles
+        {
+            public GUIStyle Title, Body, Small, Warn, Tag, NodeTitle;
+        }
+
+        private readonly List<HudLine> _lines = new List<HudLine>();
+        private HudStyles _styles;     // used for drawing; rebuilt when the fitted scale changes
+        private HudStyles _reference;  // fixed at scale 1, used only to measure the natural height
+        private float _appliedScale = -1f;
         private Texture2D _panelTex, _whiteTex;
 
         private void OnGUI()
         {
-            float hudScale = Mathf.Max(1f, Screen.height / 720f); // keep text readable on tall screens
-            if (_h1 == null)
-                BuildGuiStyles(hudScale);
+            if (_reference == null)
+            {
+                _reference = MakeStyles(1f);
+                _panelTex = SolidTexture(new Color(0f, 0f, 0f, 0.65f));
+                _whiteTex = SolidTexture(Color.white);
+            }
+
+            BuildHudLines();
+
+            float panelW = Mathf.Clamp(Screen.width * 0.30f, 360f, Screen.width * 0.5f);
+            float innerW = panelW - 28f;
+            float available = Screen.height - 48f; // window minus the panel's margins and padding
+
+            // Text grows with screen height for readability, but never past the size at which the
+            // measured content would overflow the window — so the panel never clips.
+            float natural = MeasureHud(_reference, innerW);
+            float scale = Mathf.Min(Screen.height / 720f, available / natural);
+            EnsureStyles(Mathf.Max(scale, 0.7f));
 
             DrawWorldLabels();
 
-            const int hudRows = 22; // text rows the panel must fit
-            float panelW = Mathf.Max(380f, Screen.width * 0.30f);
-            float panelH = Mathf.Min(Screen.height - 24f, 30f + hudRows * 26f * hudScale);
-            Rect panelRect = new Rect(12, 12, panelW, panelH);
-            GUI.DrawTexture(panelRect, _panelTex);
-
-            GUILayout.BeginArea(new Rect(panelRect.x + 14, panelRect.y + 12,
-                                         panelRect.width - 28, panelRect.height - 24));
-
-            GUILayout.Label("GOAP vs FSM — Woodcutter", _h1);
-            GUILayout.Space(4);
-            GUILayout.Label("Brain: " + (_useGoap ? "GOAP (plans with A*)" : "Hand-authored FSM"), _body);
-
-            if (_useGoap)
-                DrawGoapStatus();
-            else
-                DrawFsmStatus();
-
-            GUILayout.Space(8);
-            GUILayout.Label("World state:", _body);
-            GUILayout.Label("   HasAxe=" + _agent.State.Get(HasAxe)
-                          + "   AxeSharp=" + _agent.State.Get(AxeSharp), _body);
-            GUILayout.Label("   HasLogs=" + _agent.State.Get(HasLogs)
-                          + "   HasPlanks=" + _agent.State.Get(HasPlanks), _body);
-            GUILayout.Label("   AxeInShed=" + _agent.State.Get(AxeInShed)
-                          + "   HasGold=" + _agent.State.Get(HasGold), _body);
-
-            GUILayout.Space(8);
-            GUILayout.Label("Interact:", _body);
-            GUILayout.Label("   [S] steal axe + empty shed", _body);
-            GUILayout.Label("   [R] restock shed   [G] give gold", _body);
-            GUILayout.Label("   [B] break the agent's axe", _body);
-            GUILayout.Label("   [M] brain: " + (_useGoap ? "GOAP" : "FSM") + "  (switch)", _body);
-            GUILayout.Label("   [V] plan-search tree: " + (_showSearch ? "ON" : "OFF"), _body);
-
-            if (_lastEvent.Length > 0)
-            {
-                GUILayout.Space(8);
-                GUILayout.Label("Last event: " + _lastEvent, _body);
-            }
-
-            GUILayout.EndArea();
+            float contentH = MeasureHud(_styles, innerW);
+            Rect panel = new Rect(12f, 12f, panelW, Mathf.Min(contentH + 24f, Screen.height - 24f));
+            GUI.DrawTexture(panel, _panelTex);
+            DrawHud(panel.x + 14f, panel.y + 12f, innerW);
 
             if (_showSearch)
-                DrawSearchPanel(panelRect.xMax, hudScale);
+                DrawSearchPanel(panel.xMax, _appliedScale);
         }
 
-        private void BuildGuiStyles(float scale)
+        // Collects everything the panel shows, so it can be measured before it is drawn.
+        private void BuildHudLines()
         {
-            _h1 = Label(26, scale, Color.white, FontStyle.Bold);
-            _body = Label(18, scale, Color.white);
-            _tag = Label(15, scale, Color.white, FontStyle.Bold);
-            _tag.alignment = TextAnchor.MiddleCenter;
-            _nodeTitle = Label(14, scale, Color.white, FontStyle.Bold);
-            _small = Label(12, scale, new Color(0.88f, 0.88f, 0.88f));
-            _smallWrap = new GUIStyle(_small) { wordWrap = true };
-            _warn = Label(16, scale, new Color(1f, 0.82f, 0.25f));
-            _warn.wordWrap = true;
+            _lines.Clear();
+            Add("GOAP vs FSM — Woodcutter", HudText.Title);
+            Add("Brain: " + (_useGoap ? "GOAP (plans with A*)" : "Hand-authored FSM"), HudText.Body, 4f);
 
-            _panelTex = SolidTexture(new Color(0f, 0f, 0f, 0.65f));
-            _whiteTex = SolidTexture(Color.white);
+            if (_useGoap)
+                AddGoapStatus();
+            else
+                AddFsmStatus();
+
+            Add("World state:", HudText.Body, 8f);
+            Add("   HasAxe=" + _agent.State.Get(HasAxe) + "   AxeSharp=" + _agent.State.Get(AxeSharp));
+            Add("   HasLogs=" + _agent.State.Get(HasLogs) + "   HasPlanks=" + _agent.State.Get(HasPlanks));
+            Add("   AxeInShed=" + _agent.State.Get(AxeInShed) + "   HasGold=" + _agent.State.Get(HasGold));
+
+            Add("Interact:", HudText.Body, 8f);
+            Add("   [S] steal axe + empty shed");
+            Add("   [R] restock shed   [G] give gold");
+            Add("   [B] break the agent's axe");
+            Add("   [M] brain: " + (_useGoap ? "GOAP" : "FSM") + "  (switch)");
+            Add("   [V] plan-search tree: " + (_showSearch ? "ON" : "OFF"));
+
+            if (_lastEvent.Length > 0)
+                Add("Last event: " + _lastEvent, HudText.Body, 8f);
         }
 
-        private static GUIStyle Label(int size, float scale, Color color, FontStyle style = FontStyle.Normal)
+        private void AddGoapStatus()
+        {
+            Add("Goal: " + (_agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-"));
+            Add("Status: " + _agent.StatusLine);
+            Add("Plan (A* over world-states):", HudText.Body, 8f);
+
+            IReadOnlyList<GoapAction> plan = _agent.CurrentPlan;
+            if (plan == null)
+            {
+                // The only unreachable case here: no planks, no logs, no axe, empty shed, no gold.
+                if (_agent.PlanningFailed)
+                    Add("No plan: can't get an axe — the shed is empty and there's no gold. " +
+                        "Press [R] to restock the shed or [G] to give gold.", HudText.Warn);
+                else
+                    Add("   (goal satisfied — awaiting the next order)");
+                return;
+            }
+
+            for (int i = 0; i < plan.Count; i++)
+                Add((i == _agent.PlanIndex ? " > " : "   ") + plan[i].Name + "  (cost " + plan[i].Cost + ")");
+
+            // What the last search cost — the price GOAP pays for being adaptive.
+            GoapPlanner.PlanStats s = _agent.LastStats;
+            Add("Last search:  " + s.NodesExpanded + " expanded / " + s.NodesGenerated +
+                " generated,  " + s.Microseconds.ToString("0.#") + " us", HudText.Small, 8f);
+            Add("Plan cost " + s.PlanCost + " over " + s.PlanLength +
+                " actions   ·   replans so far: " + _agent.ReplanCount, HudText.Small);
+        }
+
+        private void AddFsmStatus()
+        {
+            Add("Status: " + _fsm.StatusLine, _fsm.IsStuck ? HudText.Warn : HudText.Body);
+            Add("Route: hard-coded  shed -> grindstone -> tree -> sawmill -> stockpile", HudText.Body, 8f);
+            Add("No planning, no buy-axe fallback wired.");
+            if (_fsm.IsStuck)
+                Add("Press [M] to hand the same situation to GOAP.", HudText.Warn);
+        }
+
+        private void Add(string text, HudText kind = HudText.Body, float gapBefore = 0f)
+        {
+            _lines.Add(new HudLine { Text = text, Kind = kind, GapBefore = gapBefore });
+        }
+
+        private float MeasureHud(HudStyles styles, float width)
+        {
+            float height = 0f;
+            foreach (HudLine line in _lines)
+                height += line.GapBefore + StyleOf(styles, line.Kind).CalcHeight(new GUIContent(line.Text), width);
+            return height;
+        }
+
+        private void DrawHud(float x, float y, float width)
+        {
+            foreach (HudLine line in _lines)
+            {
+                GUIStyle style = StyleOf(_styles, line.Kind);
+                GUIContent content = new GUIContent(line.Text);
+                float height = style.CalcHeight(content, width);
+                y += line.GapBefore;
+                GUI.Label(new Rect(x, y, width, height), content, style);
+                y += height;
+            }
+        }
+
+        private static GUIStyle StyleOf(HudStyles styles, HudText kind)
+        {
+            switch (kind)
+            {
+                case HudText.Title: return styles.Title;
+                case HudText.Small: return styles.Small;
+                case HudText.Warn: return styles.Warn;
+                default: return styles.Body;
+            }
+        }
+
+        private void EnsureStyles(float scale)
+        {
+            if (_styles != null && Mathf.Abs(scale - _appliedScale) < 0.02f)
+                return;
+            _styles = MakeStyles(scale);
+            _appliedScale = scale;
+        }
+
+        private static HudStyles MakeStyles(float scale)
+        {
+            HudStyles s = new HudStyles
+            {
+                Title = Label(26, scale, Color.white, FontStyle.Bold),
+                Body = Label(18, scale, Color.white, FontStyle.Normal, true),
+                Small = Label(13, scale, new Color(0.88f, 0.88f, 0.88f), FontStyle.Normal, true),
+                Warn = Label(16, scale, new Color(1f, 0.82f, 0.25f), FontStyle.Normal, true),
+                Tag = Label(15, scale, Color.white, FontStyle.Bold),
+                NodeTitle = Label(14, scale, Color.white, FontStyle.Bold)
+            };
+            s.Tag.alignment = TextAnchor.MiddleCenter;
+            return s;
+        }
+
+        private static GUIStyle Label(int size, float scale, Color color, FontStyle style, bool wrap = false)
         {
             GUIStyle s = new GUIStyle(GUI.skin.label)
             {
                 fontSize = Mathf.RoundToInt(size * scale),
-                fontStyle = style
+                fontStyle = style,
+                wordWrap = wrap
             };
             s.normal.textColor = color;
             return s;
@@ -372,57 +477,6 @@ namespace GOAP
             t.SetPixel(0, 0, color);
             t.Apply();
             return t;
-        }
-
-        private void DrawGoapStatus()
-        {
-            GUILayout.Label("Goal: " + (_agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-"), _body);
-            GUILayout.Label("Status: " + _agent.StatusLine, _body);
-
-            GUILayout.Space(8);
-            GUILayout.Label("Plan (A* over world-states):", _body);
-
-            IReadOnlyList<GoapAction> plan = _agent.CurrentPlan;
-            if (plan == null)
-            {
-                // The only way this scenario has no plan: no wood, no axe, empty shed and no gold.
-                if (_agent.PlanningFailed)
-                    GUILayout.Label("No plan: can't get an axe — the shed is empty and there's no gold. " +
-                                    "Press [R] to restock the shed or [G] to give gold.", _warn);
-                else
-                    GUILayout.Label("   (goal satisfied — awaiting the next order)", _body);
-                return;
-            }
-
-            for (int i = 0; i < plan.Count; i++)
-            {
-                string marker = i == _agent.PlanIndex ? " > " : "   ";
-                GUILayout.Label(marker + plan[i].Name + "  (cost " + plan[i].Cost + ")", _body);
-            }
-
-            DrawPlannerCost();
-        }
-
-        // What the last search actually cost — the price GOAP pays for being adaptive.
-        private void DrawPlannerCost()
-        {
-            GoapPlanner.PlanStats s = _agent.LastStats;
-            GUILayout.Space(8);
-            GUILayout.Label("Last search:  " + s.NodesExpanded + " expanded / " + s.NodesGenerated +
-                            " generated,  " + s.Microseconds.ToString("0.#") + " us", _small);
-            GUILayout.Label("Plan cost " + s.PlanCost + " over " + s.PlanLength +
-                            " actions   ·   replans so far: " + _agent.ReplanCount, _small);
-        }
-
-        private void DrawFsmStatus()
-        {
-            GUILayout.Label("Status: " + _fsm.StatusLine, _fsm.IsStuck ? _warn : _body);
-            GUILayout.Space(8);
-            GUILayout.Label("Route: hard-coded  shed -> grindstone -> tree", _body);
-            GUILayout.Label("                  -> sawmill -> stockpile", _body);
-            GUILayout.Label("No planning, no buy-axe fallback wired.", _body);
-            if (_fsm.IsStuck)
-                GUILayout.Label("Press [M] to hand the same situation to GOAP.", _warn);
         }
 
         private void DrawWorldLabels()
@@ -441,14 +495,14 @@ namespace GOAP
         {
             Vector3 sp = Camera.main.WorldToScreenPoint(t.position + Vector3.up * 1.9f);
             GUIContent gc = new GUIContent(text);
-            Vector2 size = _tag.CalcSize(gc);
+            Vector2 size = _styles.Tag.CalcSize(gc);
             const float padX = 8f, padY = 4f;
             Rect box = new Rect(sp.x - size.x / 2f - padX,
                                 Screen.height - sp.y - size.y / 2f - padY,
                                 size.x + padX * 2f,
                                 size.y + padY * 2f);
             GUI.DrawTexture(box, _panelTex);
-            GUI.Label(box, gc, _tag);
+            GUI.Label(box, gc, _styles.Tag);
         }
 
         // ---------------------------------------------------------------- plan-search visualizer
@@ -471,20 +525,20 @@ namespace GOAP
 
             FillRect(area, new Color(0f, 0f, 0f, 0.55f));
             GUI.Label(new Rect(area.x + 12f, area.y + 8f, area.width - 24f, 30f * hudScale),
-                      "Plan search — A* over world-states", _body);
+                      "Plan search — A* over world-states", _styles.Body);
 
             Rect textRect = new Rect(area.x + 12f, area.y + 42f * hudScale, area.width - 24f, 48f * hudScale);
             if (!_useGoap)
             {
                 GUI.Label(textRect, "The FSM does not search — it follows a fixed route. " +
-                                    "Press [M] to switch to the GOAP brain.", _smallWrap);
+                                    "Press [M] to switch to the GOAP brain.", _styles.Small);
                 return;
             }
 
             IReadOnlyList<GoapPlanner.SearchNode> trace = _agent.LastSearch;
             if (trace == null)
             {
-                GUI.Label(textRect, "(no search recorded yet)", _smallWrap);
+                GUI.Label(textRect, "(no search recorded yet)", _styles.Small);
                 return;
             }
 
@@ -550,17 +604,17 @@ namespace GOAP
             if (n.SatisfiesGoal)
                 title += "  (GOAL)";
 
-            GUI.Label(new Rect(r.x + pad, r.y + 3f, r.width - pad * 2f, 20f * hudScale), title, _nodeTitle);
+            GUI.Label(new Rect(r.x + pad, r.y + 3f, r.width - pad * 2f, 20f * hudScale), title, _styles.NodeTitle);
             GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH, r.width - pad * 2f, lineH),
                       "f=" + n.F.ToString("0.#") + "  g=" + n.G.ToString("0.#") + "  h=" + n.H.ToString("0.#") +
-                      "   " + (n.ExpandedOrder >= 0 ? "expanded #" + n.ExpandedOrder : "frontier"), _small);
-            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH * 2f, r.width - pad * 2f, lineH), n.TrueFacts, _small);
+                      "   " + (n.ExpandedOrder >= 0 ? "expanded #" + n.ExpandedOrder : "frontier"), _styles.Small);
+            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH * 2f, r.width - pad * 2f, lineH), n.TrueFacts, _styles.Small);
         }
 
         private void DrawLegendChip(float x, float y, float scale, Color color, string label)
         {
             FillRect(new Rect(x, y, 14f * scale, 14f * scale), color);
-            GUI.Label(new Rect(x + 20f * scale, y - 2f * scale, 140f * scale, 20f * scale), label, _small);
+            GUI.Label(new Rect(x + 20f * scale, y - 2f * scale, 140f * scale, 20f * scale), label, _styles.Small);
         }
 
         private void FillRect(Rect r, Color color)
