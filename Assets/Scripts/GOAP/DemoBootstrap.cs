@@ -312,7 +312,7 @@ namespace GOAP
 
             BuildHudLines();
 
-            float panelW = Mathf.Clamp(Screen.width * 0.30f, 360f, Screen.width * 0.5f);
+            float panelW = Mathf.Clamp(Screen.width * 0.30f, 400f, Screen.width * 0.5f);
             float innerW = panelW - 28f;
             float available = Screen.height - 48f; // window minus the panel's margins and padding
 
@@ -448,7 +448,7 @@ namespace GOAP
         {
             HudStyles s = new HudStyles
             {
-                Title = Label(26, scale, Color.white, FontStyle.Bold),
+                Title = Label(24, scale, Color.white, FontStyle.Bold, true),
                 Body = Label(18, scale, Color.white, FontStyle.Normal, true),
                 Small = Label(13, scale, new Color(0.88f, 0.88f, 0.88f), FontStyle.Normal, true),
                 Warn = Label(16, scale, new Color(1f, 0.82f, 0.25f), FontStyle.Normal, true),
