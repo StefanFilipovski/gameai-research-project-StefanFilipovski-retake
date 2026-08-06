@@ -56,7 +56,11 @@ different brains** and break them both. Press **M** to swap between:
 - **a hand-authored FSM** — [`FsmWoodcutter.cs`](Assets/Scripts/GOAP/FsmWoodcutter.cs), wired for
   exactly the route a designer would author: `shed → grindstone → tree → sawmill → stockpile`.
 
-<!-- TODO: insert fsm-vs-goap.gif here — FSM runs fine, [S] gets it stuck, [M] lets GOAP rescue the same state -->
+![The hand-authored FSM stuck after the shed is emptied](Docs/fsm-vs-goap.gif)
+
+*The FSM after the shed was emptied mid-route. It is **stuck**: it reached a situation no
+transition was authored for, and it has no way to reason its way out. Pressing **M** hands the
+identical world state to GOAP, which simply plans around the problem and buys an axe instead.*
 
 **Left alone, both brains look identical** — they each fetch the axe, chop, and deliver. The
 difference only appears when the world stops matching the script:
@@ -223,13 +227,18 @@ axe out of the shed while the woodcutter is walking to it, `AxeInShed` becomes f
 to the shop to buy one instead. No transition for "axe was stolen" was ever authored; the
 adaptive behaviour falls out of the search.
 
-<!-- TODO: insert replanning.gif here — record: press [S] mid-walk and show the agent reroute to the shop -->
+Replanning is visible in both recordings below: the [search visualizer](#seeing-the-search--the-plan-search-visualizer)
+clip shows the tree being rebuilt after the world changes, and the HUD's `replans so far` counter
+ticks up each time the agent is forced to think again.
 
 ---
 
 ## The Demo
 
-<!-- TODO: insert overview.gif here — the full chop→deliver loop with the HUD visible -->
+![The woodcutter working through its five-action plan](Docs/overview.gif)
+
+*The agent executing a plan it worked out itself. The HUD shows the goal, the ordered plan with
+the running action marked `>`, what the last search cost, and the live world state.*
 
 A woodcutter (red capsule) works six sites built at runtime:
 
@@ -270,7 +279,10 @@ Press **V** to overlay the planner's **last A\* search** as a left-to-right tree
 state-space analogue of the grid/flow-field debug views used for movement pathfinding — it makes
 the otherwise-invisible planning search concrete.
 
-<!-- TODO: insert visualizer.gif here — press [V], then [S] mid-walk, and show the tree redraw onto the BuyAxe branch -->
+![The A* search tree over world-states](Docs/plan-search-visualizer.gif)
+
+*Pressing **V** reveals the planner's actual search. `START` is on the left; each column is one
+action deeper; every box carries its own `f / g / h`. The green path is the plan that won.*
 
 - **Each box is one world-state** the planner generated. **Columns = search depth** (column 0 is
   `START`, column 1 is after one action, and so on).
