@@ -3,47 +3,35 @@ using System.Collections.Generic;
 namespace GOAP
 {
     /// <summary>
-    /// The core of GOAP: an A* search through the space of WORLD-STATES.
+    /// A* search over world-states. Same algorithm as grid pathfinding, different graph:
     ///
-    /// This is the single most important idea of the whole project, so here is the mapping
-    /// between classic A* pathfinding and GOAP planning explicitly:
+    ///     node      = a WorldState        (instead of a tile)
+    ///     edge      = applying an action  (instead of stepping to a neighbour)
+    ///     edge cost = action.Cost         (instead of distance)
+    ///     goal test = state satisfies the goal's facts
+    ///     heuristic = number of goal facts not yet satisfied
     ///
-    ///     Grid / navmesh A*         GOAP planner
-    ///     ------------------------  ------------------------------------------------
-    ///     node   = a tile           node   = a whole WorldState (a set of facts)
-    ///     edge   = step to neighbour edge  = applying an ACTION
-    ///     edge cost = distance       edge cost = action.Cost
-    ///     start  = start tile        start  = the agent's CURRENT world state
-    ///     goal   = goal tile         goal   = ANY state that satisfies the goal's facts
-    ///     heuristic = distance-to-goal  heuristic = number of goal facts not yet satisfied
-    ///
-    /// So "planning" is literally pathfinding — but through an abstract graph of possible
-    /// world-states instead of through physical space. The output path is the ordered list
-    /// of actions the agent should perform.
+    /// The returned "path" is the ordered list of actions the agent should perform.
     /// </summary>
     public class GoapPlanner
     {
-        /// <summary>One node in the search: a hypothetical world-state and how we reached it.</summary>
         private class Node
         {
             public WorldState State;
-            public Node Parent;       // the node we came from
-            public GoapAction Action; // the action applied to Parent to reach this State
-            public float G;           // cost accumulated from the start to here
-            public float H;           // heuristic estimate of cost remaining
-            public float F;           // G + H  (A*'s priority value)
+            public Node Parent;
+            public GoapAction Action;   // the action applied to Parent to reach State
+            public float G;             // cost from the start
+            public float H;             // estimated cost remaining
+            public float F;             // G + H
 
-            // Bookkeeping used only when recording the search for the visualizer.
+            // Only filled in when RecordSearch is on.
             public int Id = -1;
             public int ParentId = -1;
             public int Depth;
-            public int ExpandedOrder = -1; // the order in which A* popped/expanded this node
+            public int ExpandedOrder = -1;
         }
 
-        /// <summary>
-        /// A read-only snapshot of one node in the last search, exposed for the debug visualizer.
-        /// This is deliberately a plain data record so UI code never touches the live search nodes.
-        /// </summary>
+        /// <summary>A read-only copy of one searched node, for the debug visualizer.</summary>
         public class SearchNode
         {
             public int Id;
@@ -53,37 +41,29 @@ namespace GOAP
             public float H;
             public float F;
             public int Depth;
-            public int ExpandedOrder;   // -1 if it was generated but never expanded
+            public int ExpandedOrder;   // -1 if generated but never expanded
             public bool SatisfiesGoal;
-            public bool OnFinalPlan;    // true if this node lies on the returned plan's path
-            public string TrueFacts;    // the facts that are true in this state (for the label)
+            public bool OnFinalPlan;
+            public string TrueFacts;
         }
 
-        // When true, Plan() records every frontier node into LastSearch so the demo can draw the tree.
+        /// <summary>When on, each Plan() call fills LastSearch so the demo can draw the search tree.</summary>
         public bool RecordSearch;
         public List<SearchNode> LastSearch;
 
-        /// <summary>
-        /// Returns the cheapest ordered list of actions that takes <paramref name="start"/> to a
-        /// state satisfying <paramref name="goal"/>, or null if no such plan exists.
-        /// </summary>
+        /// <summary>Cheapest action sequence from start to a state satisfying goal, or null if none exists.</summary>
         public List<GoapAction> Plan(WorldState start, GoapGoal goal, List<GoapAction> actions)
         {
-            List<Node> open = new List<Node>();          // frontier, still to explore
-            HashSet<string> closed = new HashSet<string>(); // world-states already expanded
-
-            // Every node we put on the frontier, kept only so the visualizer can replay the search.
+            List<Node> open = new List<Node>();
+            HashSet<string> closed = new HashSet<string>();
             List<Node> recorded = RecordSearch ? new List<Node>() : null;
             int expandCounter = 0;
 
             Node startNode = new Node
             {
                 State = start,
-                Parent = null,
-                Action = null,
                 G = 0f,
-                H = Heuristic(start, goal),
-                Depth = 0
+                H = Heuristic(start, goal)
             };
             startNode.F = startNode.G + startNode.H;
             Register(recorded, startNode);
@@ -91,7 +71,7 @@ namespace GOAP
 
             while (open.Count > 0)
             {
-                // --- Pop the open node with the lowest F (best estimated total cost) ---
+                // Pop the lowest F: the most promising state to expand next.
                 int bestIndex = 0;
                 for (int i = 1; i < open.Count; i++)
                     if (open[i].F < open[bestIndex].F)
@@ -102,7 +82,6 @@ namespace GOAP
                 if (recorded != null)
                     current.ExpandedOrder = expandCounter++;
 
-                // --- Goal test: are all the goal's facts satisfied in this state? ---
                 if (current.State.Satisfies(goal.DesiredState))
                 {
                     BuildTrace(recorded, current, goal);
@@ -111,21 +90,17 @@ namespace GOAP
 
                 closed.Add(current.State.Key());
 
-                // --- Expand: every action whose preconditions hold is an outgoing edge ---
+                // Each action whose preconditions hold is an edge out of this state.
                 foreach (GoapAction action in actions)
                 {
                     if (!current.State.Satisfies(action.Preconditions))
-                        continue; // can't perform this action from the current state
+                        continue;
 
                     WorldState next = current.State.ApplyEffects(action.Effects);
-
                     if (closed.Contains(next.Key()))
-                        continue; // already fully explored this resulting state
+                        continue;
 
                     float g = current.G + action.Cost;
-
-                    // If we already have a cheaper route to an identical state on the frontier,
-                    // don't bother adding a worse duplicate.
                     if (HasCheaperOpenNode(open, next, g))
                         continue;
 
@@ -136,46 +111,42 @@ namespace GOAP
                         Action = action,
                         G = g,
                         H = Heuristic(next, goal),
-                        Depth = current.Depth + 1
+                        Depth = current.Depth + 1,
+                        ParentId = current.Id
                     };
                     child.F = child.G + child.H;
-                    child.ParentId = current.Id;
                     Register(recorded, child);
                     open.Add(child);
                 }
             }
 
-            BuildTrace(recorded, null, goal); // no plan found — still record the explored tree
-            return null;                       // frontier exhausted without reaching the goal
+            BuildTrace(recorded, null, goal);
+            return null;
         }
 
         /// <summary>
-        /// Heuristic h(n): how many of the goal's facts are still wrong in this state.
-        /// Because a well-formed action fixes at most one goal fact, this never overestimates
-        /// the remaining cost, so it is admissible and A* stays optimal.
+        /// Counts goal facts that are still wrong. An action fixes at most one of them, so this
+        /// never overestimates the remaining cost — it is admissible, so A* returns the cheapest plan.
         /// </summary>
         private int Heuristic(WorldState state, GoapGoal goal)
         {
             int missing = 0;
             foreach (KeyValuePair<string, bool> g in goal.DesiredState)
-            {
-                bool current = state.Facts.TryGetValue(g.Key, out bool v) && v;
-                if (current != g.Value)
+                if (state.Get(g.Key) != g.Value)
                     missing++;
-            }
             return missing;
         }
 
+        /// <summary>True if the frontier already holds this same state at no greater cost.</summary>
         private bool HasCheaperOpenNode(List<Node> open, WorldState state, float g)
         {
             string key = state.Key();
             foreach (Node n in open)
-                if (n.State.Key() == key && n.G <= g)
+                if (n.G <= g && n.State.Key() == key)
                     return true;
             return false;
         }
 
-        /// <summary>Walk parent pointers from the goal node back to the start, reversing into plan order.</summary>
         private List<GoapAction> ReconstructPlan(Node node)
         {
             List<GoapAction> plan = new List<GoapAction>();
@@ -187,8 +158,6 @@ namespace GOAP
             return plan;
         }
 
-        // ---- Search recording (only active when RecordSearch is true) ----
-
         private static void Register(List<Node> recorded, Node node)
         {
             if (recorded == null)
@@ -197,13 +166,12 @@ namespace GOAP
             recorded.Add(node);
         }
 
-        /// <summary>Turn the internal search nodes into the read-only SearchNode snapshots for the UI.</summary>
+        /// <summary>Copies the recorded search into SearchNodes, marking the winning path.</summary>
         private void BuildTrace(List<Node> recorded, Node goalNode, GoapGoal goal)
         {
             if (recorded == null)
                 return;
 
-            // Collect the ids that lie on the winning path (if we found one).
             HashSet<int> finalIds = new HashSet<int>();
             for (Node n = goalNode; n != null; n = n.Parent)
                 finalIds.Add(n.Id);
@@ -235,7 +203,7 @@ namespace GOAP
                 if (f.Value)
                     trueFacts.Add(f.Key);
             trueFacts.Sort();
-            return trueFacts.Count == 0 ? "(start / nothing true)" : string.Join(", ", trueFacts);
+            return trueFacts.Count == 0 ? "(nothing true)" : string.Join(", ", trueFacts);
         }
     }
 }

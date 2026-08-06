@@ -4,29 +4,16 @@ using UnityEngine;
 namespace GOAP
 {
     /// <summary>
-    /// The runtime brain that sits on top of the planner.
-    ///
-    /// GOAP separates DECIDING (the planner works out *what* sequence of actions to do) from
-    /// DOING (this component walks to each action's target and performs it). This agent is a
-    /// tiny finite state machine:
-    ///
-    ///     Idle       -> ask the planner for a plan toward the best goal
-    ///     Moving     -> walk to the current action's Target
-    ///     Performing -> wait out the action's Duration, then apply its effects
-    ///
-    /// The important GOAP behaviour is REPLANNING: every frame we check that the current action
-    /// is still valid against the (possibly changed) world. If someone empties the shed while we
-    /// walk to it, the action's precondition breaks, we throw the plan away and plan again.
+    /// Executes plans produced by GoapPlanner: Idle (ask for a plan) -> Moving -> Performing.
+    /// Every frame it re-checks the running action's preconditions, so a world change mid-plan
+    /// causes a replan rather than a broken sequence.
     /// </summary>
     public class GoapAgent : MonoBehaviour
     {
         public float MoveSpeed = 3.5f;
-
-        // When on, the agent prints its planning/execution/replanning trace to the Console.
         public bool VerboseLogging = true;
 
-        // The agent's live picture of the world. The planner reads this as its start state,
-        // and completed actions write their effects back into it.
+        /// <summary>The agent's live world model: the planner's start state, written back by finished actions.</summary>
         public WorldState State = new WorldState();
 
         public readonly List<GoapGoal> Goals = new List<GoapGoal>();
@@ -42,18 +29,16 @@ namespace GOAP
         private enum Phase { Idle, Moving, Performing }
         private Phase _phase = Phase.Idle;
         private float _performTimer;
-        private bool _loggedNoPlan; // avoids spamming the "no plan" warning every frame
+        private bool _loggedNoPlan; // so an unreachable goal warns once, not every frame
 
-        // ---- Exposed for the on-screen HUD ----
+        // Read by the demo HUD.
         public string StatusLine { get; private set; } = "Booting...";
-        // True when the agent has an active goal but the planner could not find any plan for it.
         public bool PlanningFailed { get; private set; }
         public GoapGoal ActiveGoal => _activeGoal;
         public IReadOnlyList<GoapAction> CurrentPlan => _plan;
         public int PlanIndex => _planIndex;
 
-        // ---- Exposed for the plan-search visualizer ----
-        // When on, the planner records its A* search tree each time it plans.
+        // Read by the [V] plan-search visualizer.
         public bool RecordSearch
         {
             get => _planner.RecordSearch;
@@ -69,14 +54,7 @@ namespace GOAP
                 return;
             }
 
-            if (_current == null)
-            {
-                _phase = Phase.Idle;
-                return;
-            }
-
-            // Replanning trigger: the world may have changed since we committed to this action.
-            // If its preconditions no longer hold, abandon the plan and think again.
+            // The world may have changed since we committed to this action.
             if (!State.Satisfies(_current.Preconditions))
             {
                 Replan("precondition of '" + _current.Name + "' broke");
@@ -85,25 +63,17 @@ namespace GOAP
 
             if (_phase == Phase.Moving)
                 TickMoving();
-            else if (_phase == Phase.Performing)
+            else
                 TickPerforming();
         }
 
         private void TickMoving()
         {
-            if (_current.Target == null)
-            {
-                // No physical target — perform it where we stand.
-                _phase = Phase.Performing;
-                _performTimer = _current.Duration;
-                return;
-            }
+            StatusLine = "Moving to " + _current.Name;
 
             Vector3 destination = _current.Target.position;
-            destination.y = transform.position.y; // stay on the ground plane
+            destination.y = transform.position.y;
             transform.position = Vector3.MoveTowards(transform.position, destination, MoveSpeed * Time.deltaTime);
-
-            StatusLine = "Moving to " + _current.Name;
 
             if (Vector3.Distance(transform.position, destination) < 0.05f)
             {
@@ -119,14 +89,12 @@ namespace GOAP
             if (_performTimer > 0f)
                 return;
 
-            // Action finished: commit its effects to the real world state...
             foreach (KeyValuePair<string, bool> e in _current.Effects)
                 State.Set(e.Key, e.Value);
 
             if (VerboseLogging)
-                Debug.Log("[GOAP]   done '" + _current.Name + "'  -> " + DescribeEffects(_current.Effects));
+                Debug.Log("[GOAP]   done '" + _current.Name + "'  -> " + Describe(_current.Effects));
 
-            // ...and move on to the next action in the plan.
             AdvancePlan();
         }
 
@@ -149,7 +117,7 @@ namespace GOAP
                 if (VerboseLogging && !_loggedNoPlan)
                 {
                     Debug.LogWarning("[GOAP] No valid plan for goal '" + _activeGoal.Name +
-                                     "'. World: " + DescribeState());
+                                     "'. World: " + Describe(State.Facts));
                     _loggedNoPlan = true;
                 }
                 _plan = null;
@@ -160,7 +128,7 @@ namespace GOAP
             _loggedNoPlan = false;
             if (VerboseLogging)
                 Debug.Log("[GOAP] Planned for goal '" + _activeGoal.Name + "': " +
-                          DescribePlan(plan) + "  (total cost " + TotalCost(plan) + ")");
+                          PlanNames(plan) + "  (total cost " + TotalCost(plan) + ")");
 
             _plan = plan;
             _planIndex = -1;
@@ -170,9 +138,9 @@ namespace GOAP
         private void AdvancePlan()
         {
             _planIndex++;
-            if (_plan == null || _planIndex >= _plan.Count)
+            if (_planIndex >= _plan.Count)
             {
-                // Plan complete — drop back to Idle so we re-evaluate goals next frame.
+                // Plan finished; go Idle so goals are re-evaluated next frame.
                 _current = null;
                 _phase = Phase.Idle;
                 return;
@@ -183,11 +151,11 @@ namespace GOAP
 
             if (VerboseLogging)
                 Debug.Log("[GOAP]   step " + (_planIndex + 1) + "/" + _plan.Count +
-                          ": start '" + _current.Name + "' (cost " + _current.Cost + ")" +
-                          (_current.Target != null ? "  -> moving to " + _current.Target.name : ""));
+                          ": start '" + _current.Name + "' (cost " + _current.Cost +
+                          ")  -> moving to " + _current.Target.name);
         }
 
-        /// <summary>Discard the current plan and re-plan from scratch on the next frame.</summary>
+        /// <summary>Drop the current plan; a new one is built on the next frame.</summary>
         public void Replan(string reason)
         {
             StatusLine = "Replanning (" + reason + ")";
@@ -205,45 +173,35 @@ namespace GOAP
             foreach (GoapGoal g in Goals)
             {
                 if (State.Satisfies(g.DesiredState))
-                    continue; // nothing to do for this one
+                    continue;
                 if (best == null || g.Priority > best.Priority)
                     best = g;
             }
             return best;
         }
 
-        // ---- Logging helpers ----
-
-        private static string DescribePlan(List<GoapAction> plan)
+        private static string PlanNames(List<GoapAction> plan)
         {
-            string[] names = new string[plan.Count];
-            for (int i = 0; i < plan.Count; i++)
-                names[i] = plan[i].Name;
+            List<string> names = new List<string>(plan.Count);
+            foreach (GoapAction a in plan)
+                names.Add(a.Name);
             return string.Join(" -> ", names);
         }
 
         private static float TotalCost(List<GoapAction> plan)
         {
-            float c = 0f;
+            float total = 0f;
             foreach (GoapAction a in plan)
-                c += a.Cost;
-            return c;
+                total += a.Cost;
+            return total;
         }
 
-        private static string DescribeEffects(Dictionary<string, bool> effects)
+        private static string Describe(Dictionary<string, bool> facts)
         {
-            List<string> parts = new List<string>();
-            foreach (KeyValuePair<string, bool> e in effects)
-                parts.Add(e.Key + "=" + e.Value);
-            return string.Join(", ", parts);
-        }
-
-        private string DescribeState()
-        {
-            List<string> parts = new List<string>();
-            foreach (KeyValuePair<string, bool> f in State.Facts)
+            List<string> parts = new List<string>(facts.Count);
+            foreach (KeyValuePair<string, bool> f in facts)
                 parts.Add(f.Key + "=" + f.Value);
-            return "{ " + string.Join(", ", parts) + " }";
+            return string.Join(", ", parts);
         }
     }
 }

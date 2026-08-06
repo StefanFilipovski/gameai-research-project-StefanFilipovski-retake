@@ -4,19 +4,12 @@ using System.Text;
 namespace GOAP
 {
     /// <summary>
-    /// The symbolic world model used by the planner.
-    ///
-    /// GOAP does not reason about the game world directly. Instead it reasons about
-    /// a small set of named boolean facts — e.g. "HasAxe", "HasWood", "AxeInShed".
-    /// A <see cref="WorldState"/> is simply a snapshot of those facts.
-    ///
-    /// The planner treats each distinct WorldState as a NODE in a graph, and searches
-    /// through that graph with A* (see <see cref="GoapPlanner"/>). Keeping the state
-    /// small and symbolic is what makes that search cheap.
+    /// A snapshot of the world as a set of named boolean facts (e.g. "HasAxe", "AxeInShed").
+    /// The planner treats each distinct WorldState as one node in its search graph.
     /// </summary>
     public class WorldState
     {
-        // key -> value. Missing key is treated as false.
+        // A key that is absent counts as false.
         public readonly Dictionary<string, bool> Facts;
 
         public WorldState()
@@ -24,16 +17,9 @@ namespace GOAP
             Facts = new Dictionary<string, bool>();
         }
 
-        public WorldState(Dictionary<string, bool> facts)
+        private WorldState(Dictionary<string, bool> facts)
         {
-            // Copy so the caller's dictionary is never mutated behind their back.
             Facts = new Dictionary<string, bool>(facts);
-        }
-
-        /// <summary>A deep copy — planning explores many hypothetical states without touching the real one.</summary>
-        public WorldState Clone()
-        {
-            return new WorldState(Facts);
         }
 
         public bool Get(string key)
@@ -46,41 +32,31 @@ namespace GOAP
             Facts[key] = value;
         }
 
-        /// <summary>
-        /// True if EVERY fact in <paramref name="conditions"/> matches this state.
-        /// Used both to test action preconditions and to test whether a goal is reached.
-        /// </summary>
+        /// <summary>True if every listed fact matches this state. Used for preconditions and the goal test.</summary>
         public bool Satisfies(Dictionary<string, bool> conditions)
         {
             foreach (KeyValuePair<string, bool> c in conditions)
             {
-                bool current = Facts.TryGetValue(c.Key, out bool v) && v;
-                if (current != c.Value)
+                if (Get(c.Key) != c.Value)
                     return false;
             }
             return true;
         }
 
-        /// <summary>
-        /// Returns a NEW state with the given effects applied. The original is untouched,
-        /// which is exactly what A* needs when generating a neighbour node.
-        /// </summary>
+        /// <summary>Returns a new state with the effects applied; the original is untouched.</summary>
         public WorldState ApplyEffects(Dictionary<string, bool> effects)
         {
-            WorldState result = Clone();
+            WorldState result = new WorldState(Facts);
             foreach (KeyValuePair<string, bool> e in effects)
                 result.Facts[e.Key] = e.Value;
             return result;
         }
 
-        /// <summary>
-        /// A stable string that uniquely identifies this state's facts, used as the key
-        /// for A*'s closed set so we never expand the same world-state twice.
-        /// </summary>
+        /// <summary>Identifies this state's facts, so A* can detect states it has already seen. Sorted for stability.</summary>
         public string Key()
         {
             List<string> keys = new List<string>(Facts.Keys);
-            keys.Sort(); // sort so identical states always produce identical keys
+            keys.Sort();
             StringBuilder sb = new StringBuilder();
             foreach (string k in keys)
                 sb.Append(k).Append('=').Append(Facts[k] ? '1' : '0').Append(';');

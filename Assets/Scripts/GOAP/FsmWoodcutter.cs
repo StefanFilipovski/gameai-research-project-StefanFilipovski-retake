@@ -3,30 +3,19 @@ using UnityEngine;
 namespace GOAP
 {
     /// <summary>
-    /// A deliberately hand-authored Finite State Machine that does the SAME job as the GOAP agent,
-    /// so the two can be compared directly (toggle with [M] in the demo).
-    ///
-    /// The whole point of this class is to show GOAP's advantage by contrast. This FSM is wired for
-    /// exactly one route — go to the shed, get the axe, chop, deliver — because that is the "happy
-    /// path" a designer would author. It works perfectly as long as the world matches that script.
-    ///
-    /// But it has NO transition for "the shed is empty" or "my axe is gone", because nobody wired
-    /// one. So the moment you steal the axe, it reaches a state it was never told how to handle and
-    /// gets STUCK. A GOAP agent in the same situation simply re-plans onto the buy-axe branch — that
-    /// branch exists automatically because the BuyAxe action exists, with no transitions to author.
-    ///
-    /// This is the classic trade-off: FSMs are cheap and predictable but brittle to unforeseen
-    /// situations; GOAP spends a little search to stay adaptive.
+    /// A hand-authored finite state machine doing the same job as the GOAP agent, for the [M]
+    /// comparison. It is wired for one route — shed, tree, stockpile — which is what a designer
+    /// would author. There is deliberately no "buy an axe" state, so when the shed is emptied it
+    /// reaches a situation nobody anticipated and gets stuck; GOAP replans out of the same state.
     /// </summary>
     public class FsmWoodcutter : MonoBehaviour
     {
         public float MoveSpeed = 3.5f;
         public bool VerboseLogging = true;
 
-        // Shared blackboard (the same WorldState the GOAP agent and the player interactions use).
+        /// <summary>Shared with the GOAP agent, so player interactions affect whichever brain is active.</summary>
         public WorldState State;
 
-        // Job sites, assigned by the demo bootstrap.
         public Transform Shed, Tree, Stockpile;
 
         private const string HasAxe = "HasAxe";
@@ -34,17 +23,16 @@ namespace GOAP
         private const string AxeInShed = "AxeInShed";
         private const string WoodDelivered = "WoodDelivered";
 
-        // The hand-authored states. Note there is no "BuyAxe" state anywhere — that is the point.
         private enum Step { ToShed, GetAxe, ToTree, Chop, ToStockpile, Deliver, WaitForNextOrder, Stuck }
-        private Step _step = Step.ToShed;
+        private Step _step;
         private float _timer;
 
-        public string StatusLine { get; private set; } = "FSM idle";
+        public string StatusLine { get; private set; }
         public bool IsStuck => _step == Step.Stuck;
 
+        // Restart the script each time this brain is switched on.
         private void OnEnable()
         {
-            // Restart the script whenever this brain becomes active.
             _step = Step.ToShed;
             StatusLine = "FSM: go to the shed";
         }
@@ -61,7 +49,6 @@ namespace GOAP
                 case Step.GetAxe:
                     _timer -= Time.deltaTime;
                     if (_timer > 0f) break;
-                    // The FSM was told "the axe is in the shed". It has no fallback if it isn't.
                     if (State.Get(AxeInShed))
                     {
                         State.Set(HasAxe, true);
@@ -69,10 +56,7 @@ namespace GOAP
                         _step = Step.ToTree;
                         Say("go to the tree");
                     }
-                    else
-                    {
-                        GetStuck("shed is empty — no authored 'buy axe' transition exists");
-                    }
+                    else GetStuck("shed is empty — no authored 'buy axe' transition exists");
                     break;
 
                 case Step.ToTree:
@@ -81,7 +65,6 @@ namespace GOAP
                     break;
 
                 case Step.Chop:
-                    // If the axe was taken after we "got" it, the FSM is stranded here.
                     if (!State.Get(HasAxe)) { GetStuck("no axe at the tree — FSM cannot replan to get one"); break; }
                     _timer -= Time.deltaTime;
                     if (_timer > 0f) break;
@@ -105,20 +88,19 @@ namespace GOAP
                     break;
 
                 case Step.WaitForNextOrder:
-                    // The demo clears WoodDelivered and restocks the shed for the next order.
+                    // The demo clears WoodDelivered when it issues the next order.
                     if (!State.Get(WoodDelivered)) { _step = Step.ToShed; Say("go to the shed"); }
                     break;
 
                 case Step.Stuck:
-                    // No authored recovery. This is the whole demonstration: switch to GOAP ([M])
-                    // and the same situation is solved by re-planning.
+                    // No authored recovery — that is the point of the comparison.
                     break;
             }
         }
 
+        /// <summary>Walks toward the target; returns true once it has arrived.</summary>
         private bool MoveTo(Transform target)
         {
-            if (target == null) return true;
             Vector3 destination = target.position;
             destination.y = transform.position.y;
             transform.position = Vector3.MoveTowards(transform.position, destination, MoveSpeed * Time.deltaTime);
