@@ -3,10 +3,7 @@ using System.Text;
 
 namespace GOAP
 {
-    /// <summary>
-    /// A snapshot of the world as a set of named boolean facts (e.g. "HasAxe", "AxeInShed").
-    /// The planner treats each distinct WorldState as one node in its search graph.
-    /// </summary>
+    
     public class WorldState
     {
         // A key that is absent counts as false.
@@ -32,7 +29,6 @@ namespace GOAP
             Facts[key] = value;
         }
 
-        /// <summary>True if every listed fact matches this state. Used for preconditions and the goal test.</summary>
         public bool Satisfies(Dictionary<string, bool> conditions)
         {
             foreach (KeyValuePair<string, bool> c in conditions)
@@ -43,7 +39,6 @@ namespace GOAP
             return true;
         }
 
-        /// <summary>Returns a new state with the effects applied; the original is untouched.</summary>
         public WorldState ApplyEffects(Dictionary<string, bool> effects)
         {
             WorldState result = new WorldState(Facts);
@@ -52,7 +47,6 @@ namespace GOAP
             return result;
         }
 
-        /// <summary>Identifies this state's facts, so A* can detect states it has already seen. Sorted for stability.</summary>
         public string Key()
         {
             List<string> keys = new List<string>(Facts.Keys);

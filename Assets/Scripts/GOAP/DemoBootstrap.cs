@@ -6,24 +6,9 @@ using UnityEngine.InputSystem;
 
 namespace GOAP
 {
-    /// <summary>
-    /// Builds and drives the whole demo from one component: attach it to an empty GameObject and
-    /// press Play. It creates the scene, defines the woodcutter's actions and goal, applies the
-    /// player's interactions to the world state, and draws the HUD and the plan-search visualizer.
-    ///
-    /// Scenario — goal is PlanksDelivered:
-    ///   GetAxeFromShed (needs an axe in the shed)   -> has axe     cost 2
-    ///   BuyAxe         (needs gold)                 -> has axe     cost 4
-    ///   SharpenAxe     (needs an axe)               -> axe sharp   cost 1
-    ///   ChopLogs       (needs a sharp axe)          -> has logs    cost 3
-    ///   SawPlanks      (needs logs)                 -> has planks  cost 2
-    ///   DeliverPlanks  (needs planks)               -> delivered   cost 1
-    /// The cheapest plan is five actions long (total 9); acquiring the axe by buying instead costs
-    /// 11, so the planner only takes that branch when the shed is empty.
-    /// </summary>
+   
     public class DemoBootstrap : MonoBehaviour
     {
-        // Fact names as constants so actions, goals and interactions cannot disagree by typo.
         private const string HasAxe = "HasAxe";
         private const string AxeSharp = "AxeSharp";
         private const string HasLogs = "HasLogs";
@@ -47,7 +32,7 @@ namespace GOAP
             BuildAgent();
         }
 
-        // ---------------------------------------------------------------- scene construction
+        //scene construction
 
         private void BuildEnvironment()
         {
@@ -139,7 +124,7 @@ namespace GOAP
                 .At(_stockpile).TakesSeconds(1.0f));
 
             _agent.Goals.Add(new GoapGoal("DeliverPlanks", 5f).Want(PlanksDelivered, true));
-            _agent.RecordSearch = true; // keep the A* search so [V] can draw it
+            _agent.RecordSearch = true; 
 
             // The FSM brain shares the same world state and starts disabled; GOAP drives by default.
             _fsm = go.AddComponent<FsmWoodcutter>();
@@ -153,7 +138,7 @@ namespace GOAP
             _fsm.enabled = false;
         }
 
-        // ---------------------------------------------------------------- interaction + loop
+        // interaction + loop
 
         private void Update()
         {
@@ -190,8 +175,7 @@ namespace GOAP
             _agent.State.Set(PlanksDelivered, false);
         }
 
-        // Reads the new Input System when present (Unity 6 default) and the legacy Input Manager
-        // otherwise, so the demo runs without changing Player Settings.
+       
         private void HandleInput()
         {
 #if ENABLE_INPUT_SYSTEM
@@ -256,8 +240,7 @@ namespace GOAP
                 _agent.Replan(reason);
         }
 
-        // Swaps brains in place, leaving the world state and position alone, so the incoming brain
-        // inherits the exact situation the other one was in.
+       
         private void ToggleBrain()
         {
             _useGoap = !_useGoap;
@@ -275,11 +258,11 @@ namespace GOAP
 
         private static void Colorize(GameObject go, Color color)
         {
-            // Primitives ship with a renderer using the Built-in pipeline's Standard shader.
+          
             go.GetComponent<Renderer>().material.color = color;
         }
 
-        // ---------------------------------------------------------------- HUD
+        // HUD
 
         private enum HudText { Title, Body, Small, Warn }
 
@@ -296,8 +279,8 @@ namespace GOAP
         }
 
         private readonly List<HudLine> _lines = new List<HudLine>();
-        private HudStyles _styles;     // used for drawing; rebuilt when the fitted scale changes
-        private HudStyles _reference;  // fixed at scale 1, used only to measure the natural height
+        private HudStyles _styles;     
+        private HudStyles _reference;  
         private float _appliedScale = -1f;
         private Texture2D _panelTex, _whiteTex;
 
@@ -314,10 +297,9 @@ namespace GOAP
 
             float panelW = Mathf.Clamp(Screen.width * 0.30f, 400f, Screen.width * 0.5f);
             float innerW = panelW - 28f;
-            float available = Screen.height - 48f; // window minus the panel's margins and padding
+            float available = Screen.height - 48f; 
 
-            // Text grows with screen height for readability, but never past the size at which the
-            // measured content would overflow the window — so the panel never clips.
+          
             float natural = MeasureHud(_reference, innerW);
             float scale = Mathf.Min(Screen.height / 720f, available / natural);
             EnsureStyles(Mathf.Max(scale, 0.7f));
@@ -333,7 +315,7 @@ namespace GOAP
                 DrawSearchPanel(panel.xMax, _appliedScale);
         }
 
-        // Collects everything the panel shows, so it can be measured before it is drawn.
+       
         private void BuildHudLines()
         {
             _lines.Clear();
@@ -382,7 +364,7 @@ namespace GOAP
             for (int i = 0; i < plan.Count; i++)
                 Add((i == _agent.PlanIndex ? " > " : "   ") + plan[i].Name + "  (cost " + plan[i].Cost + ")");
 
-            // What the last search cost — the price GOAP pays for being adaptive.
+          
             GoapPlanner.PlanStats s = _agent.LastStats;
             Add("Last search:  " + s.NodesExpanded + " expanded / " + s.NodesGenerated +
                 " generated,  " + s.Microseconds.ToString("0.#") + " us", HudText.Small, 8f);
@@ -505,18 +487,14 @@ namespace GOAP
             GUI.Label(box, gc, _styles.Tag);
         }
 
-        // ---------------------------------------------------------------- plan-search visualizer
+        // plan-search visualizer
 
         private static readonly Color ColGoal = new Color(0.35f, 0.95f, 0.45f);
         private static readonly Color ColPlan = new Color(0.20f, 0.70f, 0.30f);
         private static readonly Color ColExpanded = new Color(0.30f, 0.55f, 0.95f);
         private static readonly Color ColFrontier = new Color(0.50f, 0.50f, 0.55f);
 
-        /// <summary>
-        /// Draws the planner's last A* search: one box per world-state it generated, columns by
-        /// search depth, edges are actions, and the chosen plan highlighted. The state-space
-        /// equivalent of a grid pathfinding debug view.
-        /// </summary>
+       
         private void DrawSearchPanel(float leftX, float hudScale)
         {
             Rect area = new Rect(leftX + 12f, 12f, Screen.width - leftX - 24f, Screen.height - 24f);
@@ -595,14 +573,13 @@ namespace GOAP
                          : n.ExpandedOrder >= 0 ? ColExpanded
                          : ColFrontier;
 
-            FillRect(new Rect(r.x - 2f, r.y - 2f, r.width + 4f, r.height + 4f), border); // border
-            FillRect(r, new Color(0.06f, 0.06f, 0.08f, 0.96f));                          // body
+            FillRect(new Rect(r.x - 2f, r.y - 2f, r.width + 4f, r.height + 4f), border); 
+            FillRect(r, new Color(0.06f, 0.06f, 0.08f, 0.96f));                          
 
             const float pad = 8f;
             float lineH = 18f * hudScale;
             float textW = r.width - pad * 2f;
 
-            // A goal node is shown by its bright border and the legend, so the title stays short.
             string title = n.ActionName ?? "START";
             string cost = "f=" + n.F.ToString("0.#") + " g=" + n.G.ToString("0.#") + " h=" + n.H.ToString("0.#");
             string order = n.ExpandedOrder >= 0 ? "#" + n.ExpandedOrder : "frontier";
@@ -615,7 +592,6 @@ namespace GOAP
                       Fit(n.TrueFacts, _styles.Small, textW), _styles.Small);
         }
 
-        // Trims text to the given width so node labels end cleanly instead of being cut mid-word.
         private static string Fit(string text, GUIStyle style, float width)
         {
             if (style.CalcSize(new GUIContent(text)).x <= width)
@@ -644,7 +620,6 @@ namespace GOAP
             GUI.color = previous;
         }
 
-        // IMGUI has no line primitive, so stretch a 1x1 texture and rotate it into place.
         private void GuiLine(Vector2 a, Vector2 b, float width, Color color)
         {
             Matrix4x4 saved = GUI.matrix;

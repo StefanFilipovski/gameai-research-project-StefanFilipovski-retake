@@ -2,19 +2,12 @@ using UnityEngine;
 
 namespace GOAP
 {
-    /// <summary>
-    /// A hand-authored finite state machine doing the same job as the GOAP agent, for the [M]
-    /// comparison. It is wired for one route — shed, grindstone, tree, sawmill, stockpile — which
-    /// is what a designer would author. There is deliberately no "buy an axe" state, so when the
-    /// shed is emptied it reaches a situation nobody anticipated and gets stuck; GOAP replans out
-    /// of the same state. Note how many states this needs versus GOAP's six independent actions.
-    /// </summary>
+   
     public class FsmWoodcutter : MonoBehaviour
     {
         public float MoveSpeed = 3.5f;
         public bool VerboseLogging = true;
 
-        /// <summary>Shared with the GOAP agent, so player interactions affect whichever brain is active.</summary>
         public WorldState State;
 
         public Transform Shed, Grindstone, Tree, Sawmill, Stockpile;
@@ -124,19 +117,17 @@ namespace GOAP
                     break;
 
                 case Step.Stuck:
-                    // No authored recovery — that is the point of the comparison.
+                    // No authored recovery
                     break;
             }
         }
 
-        /// <summary>Counts down the current step's timer; true once it has elapsed.</summary>
         private bool Wait()
         {
             _timer -= Time.deltaTime;
             return _timer <= 0f;
         }
 
-        /// <summary>The axe can be taken mid-route, and this FSM has no way to go and get another.</summary>
         private bool RequireAxe()
         {
             if (State.Get(HasAxe))
@@ -145,7 +136,6 @@ namespace GOAP
             return false;
         }
 
-        /// <summary>Walks toward the target; returns true once it has arrived.</summary>
         private bool MoveTo(Transform target)
         {
             Vector3 destination = target.position;

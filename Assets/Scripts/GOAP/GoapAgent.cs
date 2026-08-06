@@ -3,17 +3,12 @@ using UnityEngine;
 
 namespace GOAP
 {
-    /// <summary>
-    /// Executes plans produced by GoapPlanner: Idle (ask for a plan) -> Moving -> Performing.
-    /// Every frame it re-checks the running action's preconditions, so a world change mid-plan
-    /// causes a replan rather than a broken sequence.
-    /// </summary>
+   
     public class GoapAgent : MonoBehaviour
     {
         public float MoveSpeed = 3.5f;
         public bool VerboseLogging = true;
 
-        /// <summary>The agent's live world model: the planner's start state, written back by finished actions.</summary>
         public WorldState State = new WorldState();
 
         public readonly List<GoapGoal> Goals = new List<GoapGoal>();
@@ -29,7 +24,7 @@ namespace GOAP
         private enum Phase { Idle, Moving, Performing }
         private Phase _phase = Phase.Idle;
         private float _performTimer;
-        private bool _loggedNoPlan; // so an unreachable goal warns once, not every frame
+        private bool _loggedNoPlan; 
 
         // Read by the demo HUD.
         public string StatusLine { get; private set; } = "Booting...";
@@ -38,7 +33,7 @@ namespace GOAP
         public IReadOnlyList<GoapAction> CurrentPlan => _plan;
         public int PlanIndex => _planIndex;
 
-        // Read by the [V] plan-search visualizer.
+        // Read by the V plan-search visualizer.
         public bool RecordSearch
         {
             get => _planner.RecordSearch;
@@ -46,7 +41,6 @@ namespace GOAP
         }
         public IReadOnlyList<GoapPlanner.SearchNode> LastSearch => _planner.LastSearch;
 
-        /// <summary>Cost of the most recent search, and how often the world has forced a rethink.</summary>
         public GoapPlanner.PlanStats LastStats => _planner.LastStats;
         public int ReplanCount { get; private set; }
 
@@ -161,7 +155,6 @@ namespace GOAP
                           ")  -> moving to " + _current.Target.name);
         }
 
-        /// <summary>Drop the current plan; a new one is built on the next frame.</summary>
         public void Replan(string reason)
         {
             ReplanCount++;
@@ -173,7 +166,6 @@ namespace GOAP
             _phase = Phase.Idle;
         }
 
-        /// <summary>Highest-priority goal that is not already satisfied.</summary>
         private GoapGoal ChooseGoal()
         {
             GoapGoal best = null;
