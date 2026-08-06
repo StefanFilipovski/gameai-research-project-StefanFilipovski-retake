@@ -600,15 +600,34 @@ namespace GOAP
 
             const float pad = 8f;
             float lineH = 18f * hudScale;
-            string title = n.ActionName ?? "START";
-            if (n.SatisfiesGoal)
-                title += "  (GOAL)";
+            float textW = r.width - pad * 2f;
 
-            GUI.Label(new Rect(r.x + pad, r.y + 3f, r.width - pad * 2f, 20f * hudScale), title, _styles.NodeTitle);
-            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH, r.width - pad * 2f, lineH),
-                      "f=" + n.F.ToString("0.#") + "  g=" + n.G.ToString("0.#") + "  h=" + n.H.ToString("0.#") +
-                      "   " + (n.ExpandedOrder >= 0 ? "expanded #" + n.ExpandedOrder : "frontier"), _styles.Small);
-            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH * 2f, r.width - pad * 2f, lineH), n.TrueFacts, _styles.Small);
+            // A goal node is shown by its bright border and the legend, so the title stays short.
+            string title = n.ActionName ?? "START";
+            string cost = "f=" + n.F.ToString("0.#") + " g=" + n.G.ToString("0.#") + " h=" + n.H.ToString("0.#");
+            string order = n.ExpandedOrder >= 0 ? "#" + n.ExpandedOrder : "frontier";
+
+            GUI.Label(new Rect(r.x + pad, r.y + 3f, textW, 20f * hudScale),
+                      Fit(title, _styles.NodeTitle, textW), _styles.NodeTitle);
+            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH, textW, lineH),
+                      Fit(cost + "  " + order, _styles.Small, textW), _styles.Small);
+            GUI.Label(new Rect(r.x + pad, r.y + 3f + lineH * 2f, textW, lineH),
+                      Fit(n.TrueFacts, _styles.Small, textW), _styles.Small);
+        }
+
+        // Trims text to the given width so node labels end cleanly instead of being cut mid-word.
+        private static string Fit(string text, GUIStyle style, float width)
+        {
+            if (style.CalcSize(new GUIContent(text)).x <= width)
+                return text;
+
+            for (int len = text.Length - 1; len > 1; len--)
+            {
+                string candidate = text.Substring(0, len).TrimEnd(' ', ',') + "..";
+                if (style.CalcSize(new GUIContent(candidate)).x <= width)
+                    return candidate;
+            }
+            return "..";
         }
 
         private void DrawLegendChip(float x, float y, float scale, Color color, string label)
