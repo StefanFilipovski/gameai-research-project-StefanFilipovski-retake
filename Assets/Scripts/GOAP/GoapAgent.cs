@@ -46,6 +46,10 @@ namespace GOAP
         }
         public IReadOnlyList<GoapPlanner.SearchNode> LastSearch => _planner.LastSearch;
 
+        /// <summary>Cost of the most recent search, and how often the world has forced a rethink.</summary>
+        public GoapPlanner.PlanStats LastStats => _planner.LastStats;
+        public int ReplanCount { get; private set; }
+
         private void Update()
         {
             if (_phase == Phase.Idle)
@@ -127,8 +131,10 @@ namespace GOAP
             PlanningFailed = false;
             _loggedNoPlan = false;
             if (VerboseLogging)
-                Debug.Log("[GOAP] Planned for goal '" + _activeGoal.Name + "': " +
-                          PlanNames(plan) + "  (total cost " + TotalCost(plan) + ")");
+                Debug.Log("[GOAP] Planned for goal '" + _activeGoal.Name + "': " + PlanNames(plan) +
+                          "  (cost " + LastStats.PlanCost +
+                          ", expanded " + LastStats.NodesExpanded + "/" + LastStats.NodesGenerated +
+                          " states in " + LastStats.Microseconds.ToString("0.#") + " us)");
 
             _plan = plan;
             _planIndex = -1;
@@ -158,6 +164,7 @@ namespace GOAP
         /// <summary>Drop the current plan; a new one is built on the next frame.</summary>
         public void Replan(string reason)
         {
+            ReplanCount++;
             StatusLine = "Replanning (" + reason + ")";
             if (VerboseLogging)
                 Debug.Log("[GOAP] Replan requested: " + reason);
@@ -186,14 +193,6 @@ namespace GOAP
             foreach (GoapAction a in plan)
                 names.Add(a.Name);
             return string.Join(" -> ", names);
-        }
-
-        private static float TotalCost(List<GoapAction> plan)
-        {
-            float total = 0f;
-            foreach (GoapAction a in plan)
-                total += a.Cost;
-            return total;
         }
 
         private static string Describe(Dictionary<string, bool> facts)

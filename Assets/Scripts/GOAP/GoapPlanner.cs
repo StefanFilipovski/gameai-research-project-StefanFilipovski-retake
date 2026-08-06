@@ -47,17 +47,33 @@ namespace GOAP
             public string TrueFacts;
         }
 
+        /// <summary>What the last search cost, so the demo can report the price of planning.</summary>
+        public struct PlanStats
+        {
+            public int NodesExpanded;   // states popped off the frontier and examined
+            public int NodesGenerated;  // states created in total (expanded + still on the frontier)
+            public double Microseconds; // wall-clock time of the search itself
+            public int PlanLength;
+            public float PlanCost;
+            public bool Found;
+        }
+
         /// <summary>When on, each Plan() call fills LastSearch so the demo can draw the search tree.</summary>
         public bool RecordSearch;
         public List<SearchNode> LastSearch;
+        public PlanStats LastStats;
+
+        private readonly System.Diagnostics.Stopwatch _timer = new System.Diagnostics.Stopwatch();
 
         /// <summary>Cheapest action sequence from start to a state satisfying goal, or null if none exists.</summary>
         public List<GoapAction> Plan(WorldState start, GoapGoal goal, List<GoapAction> actions)
         {
+            _timer.Restart();
+            LastStats = new PlanStats();
+
             List<Node> open = new List<Node>();
             HashSet<string> closed = new HashSet<string>();
             List<Node> recorded = RecordSearch ? new List<Node>() : null;
-            int expandCounter = 0;
 
             Node startNode = new Node
             {
@@ -68,6 +84,7 @@ namespace GOAP
             startNode.F = startNode.G + startNode.H;
             Register(recorded, startNode);
             open.Add(startNode);
+            LastStats.NodesGenerated = 1;
 
             while (open.Count > 0)
             {
@@ -79,13 +96,14 @@ namespace GOAP
 
                 Node current = open[bestIndex];
                 open.RemoveAt(bestIndex);
-                if (recorded != null)
-                    current.ExpandedOrder = expandCounter++;
+                current.ExpandedOrder = LastStats.NodesExpanded++;
 
                 if (current.State.Satisfies(goal.DesiredState))
                 {
                     BuildTrace(recorded, current, goal);
-                    return ReconstructPlan(current);
+                    List<GoapAction> plan = ReconstructPlan(current);
+                    FinishStats(plan);
+                    return plan;
                 }
 
                 closed.Add(current.State.Key());
@@ -117,11 +135,26 @@ namespace GOAP
                     child.F = child.G + child.H;
                     Register(recorded, child);
                     open.Add(child);
+                    LastStats.NodesGenerated++;
                 }
             }
 
             BuildTrace(recorded, null, goal);
+            FinishStats(null);
             return null;
+        }
+
+        private void FinishStats(List<GoapAction> plan)
+        {
+            _timer.Stop();
+            LastStats.Microseconds = _timer.Elapsed.TotalMilliseconds * 1000.0;
+            LastStats.Found = plan != null;
+            if (plan == null)
+                return;
+
+            LastStats.PlanLength = plan.Count;
+            foreach (GoapAction a in plan)
+                LastStats.PlanCost += a.Cost;
         }
 
         /// <summary>
