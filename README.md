@@ -60,11 +60,12 @@ different brains** and break them both. Press **M** to swap between:
 - **a hand-authored FSM** — [`FsmWoodcutter.cs`](Assets/Scripts/GOAP/FsmWoodcutter.cs), wired for
   exactly the route a designer would author: `shed → grindstone → tree → sawmill → stockpile`.
 
-![The hand-authored FSM stuck after the shed is emptied](Docs/fsm-vs-goap.gif)
+![Handing the FSM's situation to the GOAP brain](Docs/fsm-vs-goap.gif)
 
-*The FSM after the shed was emptied mid-route. It is **stuck**: it reached a situation no
-transition was authored for, and it has no way to reason its way out. Pressing **M** hands the
-identical world state to GOAP, which simply plans around the problem and buys an axe instead.*
+*Pressing **M** puts the hand-authored FSM in charge. With the shed emptied it walks its fixed
+route into a situation no transition was authored for and simply stops — the search panel reads
+"the FSM does not search". Pressing **M** again hands the **identical world state** to GOAP,
+which plans its way out of it and carries on from where the FSM gave up.*
 
 **Left alone, both brains look identical** — they each fetch the axe, chop, and deliver. The
 difference only appears when the world stops matching the script:
@@ -179,7 +180,9 @@ plans again from the world state it actually finds itself in, so if it had alrea
 sharpened an axe and chopped its logs, the new plan is just `SawPlanks → DeliverPlanks` at cost
 3 instead of the full 9. **Progress is preserved because the plan is derived from the state, not
 from a script position.** That is the practical difference between planning and running a
-sequence, and it is the clearest thing to watch for in the demo.
+sequence, and it is the clearest thing to watch for in the demo — the
+[search visualizer clip](#seeing-the-search--the-plan-search-visualizer) below catches the moment
+`Pursuing:` flips to `StayFed (hungry)` and the whole search tree is replaced.
 
 ---
 
@@ -309,8 +312,9 @@ ticks up each time the agent is forced to think again.
 
 ![The woodcutter working through its five-action plan](Docs/overview.gif)
 
-*The agent executing a plan it worked out itself. The HUD shows the goal, the ordered plan with
-the running action marked `>`, what the last search cost, and the live world state.*
+*The agent executing a plan it worked out itself. The HUD shows both goals and which one is being
+pursued, the ordered plan with the running action marked `>`, what the last search cost and under
+which heuristic, and the live world state.*
 
 A woodcutter (red capsule) works six sites built at runtime:
 
@@ -357,7 +361,10 @@ the otherwise-invisible planning search concrete.
 ![The A* search tree over world-states](Docs/plan-search-visualizer.gif)
 
 *Pressing **V** reveals the planner's actual search. `START` is on the left; each column is one
-action deeper; every box carries its own `f / g / h`. The green path is the plan that won.*
+action deeper; every box carries its own `f / g / h`. The green path is the plan that won.
+The clip then presses **H** to switch heuristics — the goal-fact count sprawls to 15 nodes with
+`h=1` everywhere, while the relaxed plan graph reaches the same answer from a fraction of them —
+and **F** to make the agent hungry, which flips the pursued goal and replaces the whole tree.*
 
 - **Each box is one world-state** the planner generated. **Columns = search depth** (column 0 is
   `START`, column 1 is after one action, and so on).
