@@ -41,6 +41,12 @@ namespace GOAP
         }
         public IReadOnlyList<GoapPlanner.SearchNode> LastSearch => _planner.LastSearch;
 
+        public GoapPlanner.HeuristicMode Heuristics
+        {
+            get => _planner.Heuristics;
+            set => _planner.Heuristics = value;
+        }
+
         public GoapPlanner.PlanStats LastStats => _planner.LastStats;
         public int ReplanCount { get; private set; }
 

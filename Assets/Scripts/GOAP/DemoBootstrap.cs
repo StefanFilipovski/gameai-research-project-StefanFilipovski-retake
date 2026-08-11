@@ -16,6 +16,10 @@ namespace GOAP
         private const string AxeInShed = "AxeInShed";
         private const string HasGold = "HasGold";
         private const string PlanksDelivered = "PlanksDelivered";
+        private const string IsFed = "IsFed";
+
+        // How long the woodcutter works before hunger outranks the delivery goal.
+        private const float SecondsUntilHungry = 22f;
 
         private GoapAgent _agent;
         private FsmWoodcutter _fsm;
@@ -24,7 +28,8 @@ namespace GOAP
         private float _resetTimer;
         private string _lastEvent = "";
 
-        private Transform _tree, _shed, _shop, _stockpile, _grindstone, _sawmill;
+        private Transform _tree, _shed, _shop, _stockpile, _grindstone, _sawmill, _campfire;
+        private float _hungerTimer;
 
         private void Start()
         {
@@ -50,6 +55,7 @@ namespace GOAP
             _sawmill = MakeSite("Sawmill", new Vector3(-8, 0.5f, -2), new Color(0.75f, 0.45f, 0.75f));
             _stockpile = MakeSite("Stockpile", new Vector3(-4, 0.5f, -8), new Color(0.85f, 0.75f, 0.20f));
             _shop = MakeSite("Shop", new Vector3(8, 0.5f, -4), new Color(0.25f, 0.45f, 0.85f));
+            _campfire = MakeSite("Campfire", new Vector3(3, 0.5f, -8), new Color(0.90f, 0.45f, 0.15f));
         }
 
         private void SetUpCameraAndLight()
@@ -96,6 +102,7 @@ namespace GOAP
             _agent = go.AddComponent<GoapAgent>();
 
             ResetForNewOrder();
+            _agent.State.Set(IsFed, true); // hunger runs on its own clock, not per order
 
             // Two ways to get an axe; the planner picks whichever valid route is cheapest.
             _agent.Actions.Add(new GoapAction("GetAxeFromShed", 2f)
@@ -123,8 +130,16 @@ namespace GOAP
                 .Pre(HasPlanks, true).Effect(PlanksDelivered, true).Effect(HasPlanks, false)
                 .At(_stockpile).TakesSeconds(1.0f));
 
+            _agent.Actions.Add(new GoapAction("EatAtCampfire", 2f)
+                .Effect(IsFed, true)
+                .At(_campfire).TakesSeconds(1.0f));
+
+            // Two competing goals. Eating outranks working, so when hunger sets in the agent
+            // abandons whatever it is doing, deals with it, then plans its way back into the job
+            // from wherever it ended up.
             _agent.Goals.Add(new GoapGoal("DeliverPlanks", 5f).Want(PlanksDelivered, true));
-            _agent.RecordSearch = true; 
+            _agent.Goals.Add(new GoapGoal("StayFed", 10f).Want(IsFed, true));
+            _agent.RecordSearch = true;
 
             // The FSM brain shares the same world state and starts disabled; GOAP drives by default.
             _fsm = go.AddComponent<FsmWoodcutter>();
@@ -143,6 +158,7 @@ namespace GOAP
         private void Update()
         {
             HandleInput();
+            TickHunger();
 
             // Issue a fresh order shortly after each delivery, restocking supplies so every cycle
             // shows the full five-action route.
@@ -161,6 +177,32 @@ namespace GOAP
             {
                 _resetTimer = 0f;
             }
+        }
+
+        // Hunger builds while the agent is fed and stops once it is not, so the StayFed goal
+        // becomes unsatisfied on a timer rather than every frame.
+        private void TickHunger()
+        {
+            if (!_agent.State.Get(IsFed))
+            {
+                _hungerTimer = 0f;
+                return;
+            }
+
+            _hungerTimer += Time.deltaTime;
+            if (_hungerTimer >= SecondsUntilHungry)
+            {
+                _hungerTimer = 0f;
+                BecomeHungry();
+            }
+        }
+
+        private void BecomeHungry()
+        {
+            _agent.State.Set(IsFed, false);
+            _lastEvent = "The woodcutter got hungry — StayFed outranks DeliverPlanks";
+            Debug.Log("[GOAP][world] Hunger set in (IsFed=false); StayFed now outranks DeliverPlanks");
+            ReplanIfGoap("became hungry, higher-priority goal available");
         }
 
         // The starting situation, also used to begin each new order.
@@ -186,6 +228,8 @@ namespace GOAP
             else if (kb.rKey.wasPressedThisFrame) RestockShed();
             else if (kb.gKey.wasPressedThisFrame) GiveGold();
             else if (kb.bKey.wasPressedThisFrame) BreakAxe();
+            else if (kb.fKey.wasPressedThisFrame) BecomeHungry();
+            else if (kb.hKey.wasPressedThisFrame) ToggleHeuristic();
             else if (kb.mKey.wasPressedThisFrame) ToggleBrain();
             else if (kb.vKey.wasPressedThisFrame) _showSearch = !_showSearch;
 #elif ENABLE_LEGACY_INPUT_MANAGER
@@ -193,6 +237,8 @@ namespace GOAP
             else if (Input.GetKeyDown(KeyCode.R)) RestockShed();
             else if (Input.GetKeyDown(KeyCode.G)) GiveGold();
             else if (Input.GetKeyDown(KeyCode.B)) BreakAxe();
+            else if (Input.GetKeyDown(KeyCode.F)) BecomeHungry();
+            else if (Input.GetKeyDown(KeyCode.H)) ToggleHeuristic();
             else if (Input.GetKeyDown(KeyCode.M)) ToggleBrain();
             else if (Input.GetKeyDown(KeyCode.V)) _showSearch = !_showSearch;
 #endif
@@ -231,6 +277,26 @@ namespace GOAP
             _lastEvent = "The axe broke!";
             Debug.Log("[GOAP][player] B: broke the axe");
             ReplanIfGoap("player broke the axe");
+        }
+
+        // Swaps the estimate the search uses and immediately re-plans, so the stats line shows how
+        // many states each one has to expand for the very same answer.
+        private void ToggleHeuristic()
+        {
+            _agent.Heuristics = _agent.Heuristics == GoapPlanner.HeuristicMode.RelaxedPlanGraph
+                ? GoapPlanner.HeuristicMode.GoalFactCount
+                : GoapPlanner.HeuristicMode.RelaxedPlanGraph;
+
+            _lastEvent = "Heuristic: " + HeuristicName();
+            Debug.Log("[GOAP][planner] Heuristic switched to " + HeuristicName());
+            ReplanIfGoap("heuristic changed");
+        }
+
+        private string HeuristicName()
+        {
+            return _agent.Heuristics == GoapPlanner.HeuristicMode.RelaxedPlanGraph
+                ? "relaxed plan graph"
+                : "goal-fact count";
         }
 
         // Only GOAP plans ahead; the FSM just reads the shared state on its next step.
@@ -331,11 +397,14 @@ namespace GOAP
             Add("   HasAxe=" + _agent.State.Get(HasAxe) + "   AxeSharp=" + _agent.State.Get(AxeSharp));
             Add("   HasLogs=" + _agent.State.Get(HasLogs) + "   HasPlanks=" + _agent.State.Get(HasPlanks));
             Add("   AxeInShed=" + _agent.State.Get(AxeInShed) + "   HasGold=" + _agent.State.Get(HasGold));
+            Add("   IsFed=" + _agent.State.Get(IsFed));
 
             Add("Interact:", HudText.Body, 8f);
             Add("   [S] steal axe + empty shed");
             Add("   [R] restock shed   [G] give gold");
             Add("   [B] break the agent's axe");
+            Add("   [F] make it hungry (goal switch)");
+            Add("   [H] heuristic: " + HeuristicName());
             Add("   [M] brain: " + (_useGoap ? "GOAP" : "FSM") + "  (switch)");
             Add("   [V] plan-search tree: " + (_showSearch ? "ON" : "OFF"));
 
@@ -345,7 +414,10 @@ namespace GOAP
 
         private void AddGoapStatus()
         {
-            Add("Goal: " + (_agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-"));
+            // Both goals are listed so the arbitration is visible, not just its outcome.
+            string active = _agent.ActiveGoal != null ? _agent.ActiveGoal.Name : "-";
+            Add("Goals:  StayFed (10)   DeliverPlanks (5)");
+            Add("Pursuing: " + active + (_agent.State.Get(IsFed) ? "" : "   (hungry)"));
             Add("Status: " + _agent.StatusLine);
             Add("Plan (A* over world-states):", HudText.Body, 8f);
 
@@ -370,6 +442,7 @@ namespace GOAP
                 " generated,  " + s.Microseconds.ToString("0.#") + " us", HudText.Small, 8f);
             Add("Plan cost " + s.PlanCost + " over " + s.PlanLength +
                 " actions   ·   replans so far: " + _agent.ReplanCount, HudText.Small);
+            Add("Heuristic: " + HeuristicName() + "   ·   branches pruned: " + s.NodesPruned, HudText.Small);
         }
 
         private void AddFsmStatus()
@@ -469,6 +542,7 @@ namespace GOAP
             LabelWorld(_sawmill, "SAWMILL");
             LabelWorld(_stockpile, "STOCKPILE");
             LabelWorld(_shop, "SHOP");
+            LabelWorld(_campfire, "CAMPFIRE");
             LabelWorld(_agent.transform, "AGENT");
         }
 
