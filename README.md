@@ -158,9 +158,24 @@ no edits to the existing six.
 
 ### 3. Goals — [`GoapGoal.cs`](Assets/Scripts/GOAP/GoapGoal.cs)
 
-A goal is a desired world-state plus a **priority**. An agent can hold several; each frame it
-picks the highest-priority goal that is not already satisfied and plans toward it. Here there is
-one goal — `PlanksDelivered = true` — but the machinery supports many.
+A goal is a desired world-state plus a **priority**. The agent holds several and always pursues
+the highest-priority one that is **not already satisfied** — deciding *what to want* before
+deciding *how to get it*. This demo runs two:
+
+| Goal | Priority | Wants |
+|---|---|---|
+| `StayFed` | 10 | `IsFed` |
+| `DeliverPlanks` | 5 | `PlanksDelivered` |
+
+Hunger builds on a timer (or press **F**). The moment `IsFed` goes false, `StayFed` outranks the
+job, so the agent **abandons whatever it was doing mid-plan**, walks to the campfire and eats.
+
+The interesting part is what happens next. It doesn't restart the job from the beginning: it
+plans again from the world state it actually finds itself in, so if it had already fetched and
+sharpened an axe and chopped its logs, the new plan is just `SawPlanks → DeliverPlanks` at cost
+3 instead of the full 9. **Progress is preserved because the plan is derived from the state, not
+from a script position.** That is the practical difference between planning and running a
+sequence, and it is the clearest thing to watch for in the demo.
 
 ---
 
@@ -177,9 +192,33 @@ one goal — `PlanksDelivered = true` — but the machinery supports many.
    cheaply).
 4. If the open set empties without reaching the goal, there is **no plan** → return `null`.
 
-**The heuristic** `h(state)` = *the number of goal facts still unsatisfied*. Because a
-well-formed action fixes at most one goal fact, `h` never overestimates the true remaining cost,
-so it is **admissible** and A\* returns an **optimal (cheapest) plan**.
+The frontier is a **binary min-heap** ordered on `f`, so finding the cheapest node is O(log n)
+rather than the O(n) scan a plain list needs; ties fall back to insertion order so the same
+problem always yields the same plan. Duplicate states are handled by **replacement rather than
+by skipping**: a `bestOnOpen` map tracks the cheapest cost at which each state currently sits on
+the frontier, so discovering a better route to a known state supersedes the queued one instead of
+leaving a worse copy behind, and a stale copy that surfaces later is simply discarded.
+
+**The heuristic** is what tells A\* which states are worth looking at first, and this project
+implements two of them. Press **H** at runtime to switch between them and watch the search
+statistics change on the identical problem.
+
+**1. Goal-fact count** — count the goal facts that are still wrong. It is admissible provided
+every action costs at least 1 and fixes at most one goal fact, so A\* still returns an optimal
+plan. But it carries almost no information: with a single-fact goal it only ever returns 0 or 1,
+which barely orders the frontier at all, so the search degenerates towards Dijkstra.
+
+**2. Relaxed plan graph (`h_max`)** — solve an easier copy of the problem and use its answer as
+the estimate. The relaxation simply **ignores every negative effect**, so actions can only ever
+make facts true and nothing can be undone. Costs are propagated through the action chain until
+they stop changing, which labels each fact with the cheapest way to produce it; the estimate is
+the largest of those labels over the goal facts. Because the relaxed problem is strictly easier
+than the real one, its cost is a lower bound — the estimate stays admissible while being far
+better informed. From the starting state it returns **9**, which is the exact cost of the real
+plan, where counting facts would have returned **1**.
+
+It also detects impossibility for free: if a goal fact cannot be produced even when nothing can
+be undone, it is genuinely unreachable, so that branch is pruned instead of explored.
 
 Worked example — start with `AxeInShed = true`, `HasGold = true`, goal `PlanksDelivered`:
 
@@ -192,21 +231,50 @@ Empty the shed and the first branch's precondition disappears, so the planner is
 buy branch. This exact behaviour is covered by the automated planner tests (see
 [Testing](#testing)).
 
-### What the search costs
+### What the search costs — and whether the better heuristic is worth it
 
-Because adaptivity is bought with runtime CPU, the demo **measures** it. The HUD reports the
-last search live, and the same numbers go to the Console:
+Adaptivity is bought with runtime CPU, so rather than assert that it's cheap, the project
+**measures** it. The HUD reports the last search live, and the same numbers go to the Console:
 
 ```
-Last search:  6 expanded / 11 generated,  38.4 us
+Last search:  6 expanded / 12 generated,  397.9 us
 Plan cost 9 over 5 actions   ·   replans so far: 3
+Heuristic: relaxed plan graph   ·   branches pruned: 0
 ```
 
-A full five-action plan is found in **tens of microseconds** from a handful of node expansions.
-That is the honest answer to "isn't searching every time expensive?" — at this state-space size
-it is cheap enough to re-run whenever the world changes, which is exactly what replanning does.
-The cost grows with the number of *actions* and the *plan depth*, not with the size of the level,
-so keeping the symbolic state small is what keeps GOAP affordable.
+Running the woodcutter problem 5000 times per heuristic (`dotnet run --project Tests`) gives:
+
+| Heuristic | States expanded | Time per plan |
+|---|---|---|
+| Goal-fact count | 11 / 15 generated | **38.8 µs** |
+| Relaxed plan graph | **6 / 12 generated** | 52.2 µs |
+
+**The better heuristic is 45% cheaper in expansions and yet ~35% slower in wall-clock time.**
+That is worth stating plainly, because it is the opposite of the tidy result: `h_max` solves a
+relaxed copy of the problem *at every node*, and on a problem this small that per-node work costs
+more than the handful of expansions it saves.
+
+So when does it pay off? The benchmark answers that too, by keeping a six-step chain fixed and
+adding actions that are **irrelevant to the goal** — which is exactly what a real agent's action
+list looks like, since most of what it can do has nothing to do with the goal at hand:
+
+| Irrelevant actions | Goal-fact count | Relaxed plan graph |
+|---|---|---|
+| 0 | 7 expanded, 30 µs | 7 expanded, 45 µs |
+| 2 | 21 expanded, 120 µs | **7 expanded, 30 µs** |
+| 4 | 65 expanded, 265 µs | **7 expanded, 45 µs** |
+| 6 | 193 expanded, 1100 µs | **7 expanded, 57 µs** |
+
+The informed heuristic stays at **exactly 7 expansions no matter how much noise is added** — it
+can see that those actions contribute nothing towards the goal, so it never explores them. The
+naive one has no way to tell them apart and its expansions explode combinatorially: 7 → 21 → 65
+→ 193. The crossover arrives almost immediately, and by six irrelevant actions the informed
+search is roughly **20× faster**.
+
+That is the real lesson, and it generalises beyond this demo: the cost of GOAP is not driven by
+the size of the level, but by **how much of the action set the search can rule out**. A weak
+heuristic is fine for a toy agent with five actions and becomes unusable for one with fifty.
+The relaxed plan graph is the default here for that reason.
 
 ---
 
@@ -248,6 +316,7 @@ A woodcutter (red capsule) works six sites built at runtime:
 - 🟩 **Tree** — chop logs (needs a sharp axe)
 - 🟪 **Sawmill** — saw logs into planks
 - 🟨 **Stockpile** — deliver the planks
+- 🟧 **Campfire** — eat when hunger outranks the job
 
 The on-screen HUD shows, live: the **active goal**, the **current plan** with the running action
 marked `>`, the **world state**, and the interaction keys. When a goal becomes unreachable the
@@ -264,6 +333,8 @@ scene with a single component.
 | **R** | Restock the shed | Next plan prefers the cheap shed branch again |
 | **G** | Give the agent gold | Re-enables the buy-axe branch when the shed is empty |
 | **B** | Break the agent's axe | Agent must acquire a new axe before it can chop |
+| **F** | Make the agent hungry | `StayFed` outranks the job — goal arbitration, then resumption |
+| **H** | Switch heuristic | Same plan, different number of states searched |
 | **M** | Switch brain: GOAP ↔ hand-authored FSM | The comparison above — swaps in place, world untouched |
 | **V** | Toggle the plan-search visualizer | Shows/hides the live A\* search tree (see below) |
 
@@ -304,17 +375,31 @@ on the agent). A typical order reads:
 
 ```
 [GOAP] Planned for goal 'DeliverPlanks': GetAxeFromShed -> SharpenAxe -> ChopLogs -> SawPlanks
-       -> DeliverPlanks  (cost 9, expanded 6/11 states in 38.4 us)
+       -> DeliverPlanks  (cost 9, expanded 6/12 states in 397.9 us)
 [GOAP]   step 1/5: start 'GetAxeFromShed' (cost 2)  -> moving to Shed
 [GOAP]   done 'GetAxeFromShed'  -> HasAxe=True, AxeInShed=False
 ...
+[GOAP][player] S: stole axe + emptied shed
 [GOAP] Replan requested: player stole axe / emptied shed
 [GOAP] Planned for goal 'DeliverPlanks': BuyAxe -> SharpenAxe -> ChopLogs -> SawPlanks
-       -> DeliverPlanks  (cost 11, expanded 5/9 states in 31.7 us)
+       -> DeliverPlanks  (cost 11, expanded 6/7 states in 277.1 us)
 ```
 
 The `cost 9 → cost 11` switch is the planner proving, in the log, that it re-evaluated and chose
 the new cheapest route now that the cheap one is gone.
+
+Goal arbitration and resumption show up just as clearly. Here the agent is interrupted after it
+has already fetched, sharpened and chopped, and the plan it comes back to is three actions
+shorter than the one it started with:
+
+```
+[GOAP][world] Hunger set in (IsFed=false); StayFed now outranks DeliverPlanks
+[GOAP] Replan requested: became hungry, higher-priority goal available
+[GOAP] Planned for goal 'StayFed': EatAtCampfire  (cost 2, expanded 2/4 states in 171.0 us)
+[GOAP]   done 'EatAtCampfire'  -> IsFed=True
+[GOAP] Planned for goal 'DeliverPlanks': SawPlanks -> DeliverPlanks
+       (cost 3, expanded 3/6 states in 262.8 us)
+```
 
 ---
 
@@ -379,11 +464,16 @@ files directly and runs without the editor:
 dotnet run --project Tests
 ```
 
-Its eight checks assert that the planner finds the full five-action chain, falls back to `BuyAxe`
-when the shed is emptied, skips steps it no longer needs (a sharp axe in hand, or planks already
+Its checks assert that the planner finds the full five-action chain, falls back to `BuyAxe` when
+the shed is emptied, skips steps it no longer needs (a sharp axe in hand, or planks already
 carried), returns `null` when the goal is genuinely unreachable, returns an empty plan when the
 goal already holds, picks the **cheapest** plan rather than merely a valid one, and reports search
-statistics.
+statistics. Two of them cover the heuristics specifically: both must return the **same** plan —
+an admissible heuristic changes how much of the space is searched, never which answer comes out —
+and the informed one must expand strictly fewer states.
+
+The same run prints the benchmarks quoted above, so the performance claims in this README can be
+reproduced with one command rather than taken on trust.
 
 ---
 
@@ -400,4 +490,10 @@ statistics.
   Planning."* Video breakdown of GOAP in practice. https://www.aiandgames.com
 - **Hart, P., Nilsson, N., Raphael, B.** *"A Formal Basis for the Heuristic Determination of
   Minimum Cost Paths"* — IEEE, 1968. The original A\* paper the planner is built on.
+- **Bonet, B. & Geffner, H.** *"Planning as Heuristic Search"* — Artificial Intelligence 129,
+  2001. Introduces the `h_max` / `h_add` estimates derived from the delete relaxation, which is
+  the basis of the informed heuristic used here.
+- **Hoffmann, J. & Nebel, B.** *"The FF Planning System: Fast Plan Generation Through Heuristic
+  Search"* — Journal of Artificial Intelligence Research 14, 2001. The relaxed-plan-graph
+  heuristic that made this family of estimates the standard in automated planning.
 - **Unity Technologies.** *Unity Scripting Reference.* https://docs.unity3d.com/ScriptReference/
