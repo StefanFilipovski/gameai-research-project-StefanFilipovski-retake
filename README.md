@@ -2,6 +2,7 @@
 
 **Author:** Stefan Filipovski
 **Engine:** Unity 6 (6000.3, Built-in Render Pipeline), C#
+**Repository:** https://github.com/DAE-GD-2025-2026/gameai-research-project-StefanFilipovski
 
 > **Note on this repository.** The retake assignment points at the same GitHub Classroom
 > repository as the first take, so this branch (`main`) holds the **retake** research project on
@@ -9,7 +10,7 @@
 > [`first-take-flowfields`](../../tree/first-take-flowfields) branch.
 
 > A small, self-contained Unity demo of an agent that *plans* its own behaviour with A\*
-> instead of following a hand-authored script. A woodcutter is given a goal — "deliver wood"
+> instead of following a hand-authored script. A woodcutter is given a goal — "deliver planks"
 > — and works out the cheapest sequence of actions to achieve it, re-planning on the fly when
 > the world changes underneath it.
 >
