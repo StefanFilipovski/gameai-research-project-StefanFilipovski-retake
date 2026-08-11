@@ -22,6 +22,7 @@
 ExportedObj/
 .consulo/
 *.csproj
+!Tests/PlannerTests.csproj
 *.unityproj
 *.sln
 *.suo

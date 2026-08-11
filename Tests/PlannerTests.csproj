@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>plannertests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Assets\Scripts\GOAP\WorldState.cs" />
+    <Compile Include="..\Assets\Scripts\GOAP\GoapAction.cs" />
+    <Compile Include="..\Assets\Scripts\GOAP\GoapGoal.cs" />
+    <Compile Include="..\Assets\Scripts\GOAP\GoapPlanner.cs" />
+  </ItemGroup>
+
+</Project>
