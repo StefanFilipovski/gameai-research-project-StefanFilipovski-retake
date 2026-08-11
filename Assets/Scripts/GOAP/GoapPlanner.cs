@@ -4,11 +4,6 @@ namespace GOAP
 {
     public class GoapPlanner
     {
-        /// <summary>
-        /// Which estimate of "cost still to go" the search uses.
-        /// GoalFactCount is the naive count of unsatisfied goal facts.
-        /// RelaxedPlanGraph estimates the real cost through the action chain and is far better informed.
-        /// </summary>
         public enum HeuristicMode { GoalFactCount, RelaxedPlanGraph }
 
         private class Node
@@ -165,11 +160,6 @@ namespace GOAP
                 : RelaxedPlanCost(state, goal, actions);
         }
 
-        /// <summary>
-        /// Counts goal facts that are still wrong. Admissible while every action costs at least 1
-        /// and fixes at most one goal fact, but it carries almost no information: with a
-        /// single-fact goal it only ever returns 0 or 1, so the search degrades towards Dijkstra.
-        /// </summary>
         private static float UnsatisfiedGoalFacts(WorldState state, GoapGoal goal)
         {
             int missing = 0;
@@ -179,15 +169,6 @@ namespace GOAP
             return missing;
         }
 
-        /// <summary>
-        /// h_max over the delete relaxation: a relaxed copy of the problem in which actions only
-        /// ever make facts true. Costs propagate through the action chain until they settle, and
-        /// each goal fact ends up labelled with the cheapest way to produce it. Taking the maximum
-        /// over the goal facts never exceeds the true remaining cost, so the estimate stays
-        /// admissible while being dramatically better informed than counting facts.
-        /// Returns infinity when a goal fact cannot be produced at all, which proves the goal
-        /// unreachable from this state.
-        /// </summary>
         private static float RelaxedPlanCost(WorldState state, GoapGoal goal, List<GoapAction> actions)
         {
             Dictionary<string, float> reach = new Dictionary<string, float>();
@@ -318,11 +299,6 @@ namespace GOAP
             return trueFacts.Count == 0 ? "(nothing true)" : string.Join(", ", trueFacts);
         }
 
-        /// <summary>
-        /// Binary min-heap ordered on F, falling back to insertion order so equal-cost plans are
-        /// chosen deterministically. Push and pop are O(log n) instead of the O(n) scan a plain
-        /// list needs to find its cheapest entry.
-        /// </summary>
         private class MinHeap
         {
             private readonly List<Node> _items = new List<Node>();
