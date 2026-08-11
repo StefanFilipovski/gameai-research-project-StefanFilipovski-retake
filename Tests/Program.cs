@@ -89,6 +89,35 @@ class Program
               planner.LastStats.PlanLength == 5 ? "ok" : "missing",
               "ok");
 
+        // 9. Both heuristics must agree on the answer — an admissible heuristic changes how much
+        //    of the space is searched, never which plan comes out.
+        var naive = new GoapPlanner { Heuristics = GoapPlanner.HeuristicMode.GoalFactCount };
+        var informed = new GoapPlanner { Heuristics = GoapPlanner.HeuristicMode.RelaxedPlanGraph };
+
+        var startState = new WorldState();
+        startState.Set("AxeInShed", true); startState.Set("HasGold", true);
+
+        string naivePlan = PlanStr(naive.Plan(startState, goal, BuildActions()));
+        string informedPlan = PlanStr(informed.Plan(startState, goal, BuildActions()));
+        Check("both heuristics return the same optimal plan", informedPlan, naivePlan);
+
+        // 10. The relaxed-plan-graph estimate must actually pay for itself in expansions.
+        Check("informed heuristic expands fewer states",
+              informed.LastStats.NodesExpanded < naive.LastStats.NodesExpanded ? "fewer" : "not fewer",
+              "fewer");
+        Console.WriteLine("     naive: " + naive.LastStats.NodesExpanded + " expanded / " +
+                          naive.LastStats.NodesGenerated + " generated" +
+                          "   informed: " + informed.LastStats.NodesExpanded + " expanded / " +
+                          informed.LastStats.NodesGenerated + " generated");
+
+        // 11. An unreachable goal is detected without exhausting the whole space.
+        var deadEnd = new WorldState();
+        deadEnd.Set("AxeInShed", false); deadEnd.Set("HasGold", false);
+        Check("unreachable goal still returns null", PlanStr(informed.Plan(deadEnd, goal, BuildActions())), "NULL");
+        Check("unreachable goal detected immediately",
+              informed.LastStats.NodesExpanded == 0 ? "no expansion needed" : "searched anyway",
+              "no expansion needed");
+
         Console.WriteLine(failures == 0 ? "\nALL TESTS PASSED" : "\n" + failures + " TEST(S) FAILED");
         Environment.Exit(failures == 0 ? 0 : 1);
     }

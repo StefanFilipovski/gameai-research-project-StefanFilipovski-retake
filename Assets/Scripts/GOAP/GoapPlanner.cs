@@ -2,19 +2,25 @@ using System.Collections.Generic;
 
 namespace GOAP
 {
-  
     public class GoapPlanner
     {
+        /// <summary>
+        /// Which estimate of "cost still to go" the search uses.
+        /// GoalFactCount is the naive count of unsatisfied goal facts.
+        /// RelaxedPlanGraph estimates the real cost through the action chain and is far better informed.
+        /// </summary>
+        public enum HeuristicMode { GoalFactCount, RelaxedPlanGraph }
+
         private class Node
         {
             public WorldState State;
             public Node Parent;
-            public GoapAction Action;   
-            public float G;             
-            public float H;             
-            public float F;             
+            public GoapAction Action;
+            public float G;
+            public float H;
+            public float F;
+            public int Sequence;
 
-            // Only filled in when RecordSearch is on.
             public int Id = -1;
             public int ParentId = -1;
             public int Depth;
@@ -24,13 +30,13 @@ namespace GOAP
         public class SearchNode
         {
             public int Id;
-            public int ParentId;        
-            public string ActionName;   
+            public int ParentId;
+            public string ActionName;
             public float G;
             public float H;
             public float F;
             public int Depth;
-            public int ExpandedOrder;   
+            public int ExpandedOrder;
             public bool SatisfiesGoal;
             public bool OnFinalPlan;
             public string TrueFacts;
@@ -38,49 +44,61 @@ namespace GOAP
 
         public struct PlanStats
         {
-            public int NodesExpanded;   
-            public int NodesGenerated;  
-            public double Microseconds; 
+            public int NodesExpanded;
+            public int NodesGenerated;
+            public int NodesPruned;
+            public double Microseconds;
             public int PlanLength;
             public float PlanCost;
             public bool Found;
         }
 
+        public HeuristicMode Heuristics = HeuristicMode.RelaxedPlanGraph;
         public bool RecordSearch;
         public List<SearchNode> LastSearch;
         public PlanStats LastStats;
 
         private readonly System.Diagnostics.Stopwatch _timer = new System.Diagnostics.Stopwatch();
+        private readonly MinHeap _open = new MinHeap();
 
         public List<GoapAction> Plan(WorldState start, GoapGoal goal, List<GoapAction> actions)
         {
             _timer.Restart();
             LastStats = new PlanStats();
 
-            List<Node> open = new List<Node>();
+            _open.Clear();
             HashSet<string> closed = new HashSet<string>();
-            List<Node> recorded = RecordSearch ? new List<Node>() : null;
 
-            Node startNode = new Node
+            // Cheapest cost at which each state currently sits on the frontier. This is what makes
+            // a duplicate state replaceable instead of merely skippable.
+            Dictionary<string, float> bestOnOpen = new Dictionary<string, float>();
+            List<Node> recorded = RecordSearch ? new List<Node>() : null;
+            int sequence = 0;
+
+            float startH = Estimate(start, goal, actions);
+            if (float.IsPositiveInfinity(startH))
             {
-                State = start,
-                G = 0f,
-                H = Heuristic(start, goal)
-            };
-            startNode.F = startNode.G + startNode.H;
+                // Even ignoring every negative effect the goal cannot be produced, so no plan exists.
+                BuildTrace(recorded, null, goal);
+                FinishStats(null);
+                return null;
+            }
+
+            Node startNode = new Node { State = start, G = 0f, H = startH, F = startH, Sequence = sequence++ };
             Register(recorded, startNode);
-            open.Add(startNode);
+            _open.Push(startNode);
+            bestOnOpen[start.Key()] = 0f;
             LastStats.NodesGenerated = 1;
 
-            while (open.Count > 0)
+            while (_open.Count > 0)
             {
-                int bestIndex = 0;
-                for (int i = 1; i < open.Count; i++)
-                    if (open[i].F < open[bestIndex].F)
-                        bestIndex = i;
+                Node current = _open.Pop();
+                string currentKey = current.State.Key();
 
-                Node current = open[bestIndex];
-                open.RemoveAt(bestIndex);
+                // A cheaper route to this state was found after this copy was queued.
+                if (bestOnOpen.TryGetValue(currentKey, out float best) && current.G > best)
+                    continue;
+
                 current.ExpandedOrder = LastStats.NodesExpanded++;
 
                 if (current.State.Satisfies(goal.DesiredState))
@@ -91,21 +109,30 @@ namespace GOAP
                     return plan;
                 }
 
-                closed.Add(current.State.Key());
+                closed.Add(currentKey);
+                bestOnOpen.Remove(currentKey);
 
-                // Each action whose preconditions hold is an edge out of this state.
                 foreach (GoapAction action in actions)
                 {
                     if (!current.State.Satisfies(action.Preconditions))
                         continue;
 
                     WorldState next = current.State.ApplyEffects(action.Effects);
-                    if (closed.Contains(next.Key()))
+                    string nextKey = next.Key();
+                    if (closed.Contains(nextKey))
                         continue;
 
                     float g = current.G + action.Cost;
-                    if (HasCheaperOpenNode(open, next, g))
+                    if (bestOnOpen.TryGetValue(nextKey, out float queued) && queued <= g)
                         continue;
+
+                    float h = Estimate(next, goal, actions);
+                    if (float.IsPositiveInfinity(h))
+                    {
+                        // This branch can never reach the goal; drop it rather than queue it.
+                        LastStats.NodesPruned++;
+                        continue;
+                    }
 
                     Node child = new Node
                     {
@@ -113,13 +140,15 @@ namespace GOAP
                         Parent = current,
                         Action = action,
                         G = g,
-                        H = Heuristic(next, goal),
+                        H = h,
+                        F = g + h,
+                        Sequence = sequence++,
                         Depth = current.Depth + 1,
                         ParentId = current.Id
                     };
-                    child.F = child.G + child.H;
                     Register(recorded, child);
-                    open.Add(child);
+                    _open.Push(child);
+                    bestOnOpen[nextKey] = g;
                     LastStats.NodesGenerated++;
                 }
             }
@@ -127,6 +156,95 @@ namespace GOAP
             BuildTrace(recorded, null, goal);
             FinishStats(null);
             return null;
+        }
+
+        private float Estimate(WorldState state, GoapGoal goal, List<GoapAction> actions)
+        {
+            return Heuristics == HeuristicMode.GoalFactCount
+                ? UnsatisfiedGoalFacts(state, goal)
+                : RelaxedPlanCost(state, goal, actions);
+        }
+
+        /// <summary>
+        /// Counts goal facts that are still wrong. Admissible while every action costs at least 1
+        /// and fixes at most one goal fact, but it carries almost no information: with a
+        /// single-fact goal it only ever returns 0 or 1, so the search degrades towards Dijkstra.
+        /// </summary>
+        private static float UnsatisfiedGoalFacts(WorldState state, GoapGoal goal)
+        {
+            int missing = 0;
+            foreach (KeyValuePair<string, bool> g in goal.DesiredState)
+                if (state.Get(g.Key) != g.Value)
+                    missing++;
+            return missing;
+        }
+
+        /// <summary>
+        /// h_max over the delete relaxation: a relaxed copy of the problem in which actions only
+        /// ever make facts true. Costs propagate through the action chain until they settle, and
+        /// each goal fact ends up labelled with the cheapest way to produce it. Taking the maximum
+        /// over the goal facts never exceeds the true remaining cost, so the estimate stays
+        /// admissible while being dramatically better informed than counting facts.
+        /// Returns infinity when a goal fact cannot be produced at all, which proves the goal
+        /// unreachable from this state.
+        /// </summary>
+        private static float RelaxedPlanCost(WorldState state, GoapGoal goal, List<GoapAction> actions)
+        {
+            Dictionary<string, float> reach = new Dictionary<string, float>();
+            foreach (KeyValuePair<string, bool> f in state.Facts)
+                if (f.Value)
+                    reach[f.Key] = 0f;
+
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (GoapAction action in actions)
+                {
+                    float readyAt = 0f;
+                    bool applicable = true;
+
+                    foreach (KeyValuePair<string, bool> pre in action.Preconditions)
+                    {
+                        if (!pre.Value)
+                            continue; // the relaxation never deletes facts, so negative ones are free
+                        if (!reach.TryGetValue(pre.Key, out float at))
+                        {
+                            applicable = false;
+                            break;
+                        }
+                        if (at > readyAt)
+                            readyAt = at;
+                    }
+
+                    if (!applicable)
+                        continue;
+
+                    float produced = readyAt + action.Cost;
+                    foreach (KeyValuePair<string, bool> effect in action.Effects)
+                    {
+                        if (!effect.Value)
+                            continue;
+                        if (!reach.TryGetValue(effect.Key, out float existing) || produced < existing)
+                        {
+                            reach[effect.Key] = produced;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            float estimate = 0f;
+            foreach (KeyValuePair<string, bool> g in goal.DesiredState)
+            {
+                if (!g.Value)
+                    continue;
+                if (!reach.TryGetValue(g.Key, out float at))
+                    return float.PositiveInfinity;
+                if (at > estimate)
+                    estimate = at;
+            }
+            return estimate;
         }
 
         private void FinishStats(List<GoapAction> plan)
@@ -140,25 +258,6 @@ namespace GOAP
             LastStats.PlanLength = plan.Count;
             foreach (GoapAction a in plan)
                 LastStats.PlanCost += a.Cost;
-        }
-
-       
-        private int Heuristic(WorldState state, GoapGoal goal)
-        {
-            int missing = 0;
-            foreach (KeyValuePair<string, bool> g in goal.DesiredState)
-                if (state.Get(g.Key) != g.Value)
-                    missing++;
-            return missing;
-        }
-
-        private bool HasCheaperOpenNode(List<Node> open, WorldState state, float g)
-        {
-            string key = state.Key();
-            foreach (Node n in open)
-                if (n.G <= g && n.State.Key() == key)
-                    return true;
-            return false;
         }
 
         private List<GoapAction> ReconstructPlan(Node node)
@@ -217,6 +316,79 @@ namespace GOAP
                     trueFacts.Add(f.Key);
             trueFacts.Sort();
             return trueFacts.Count == 0 ? "(nothing true)" : string.Join(", ", trueFacts);
+        }
+
+        /// <summary>
+        /// Binary min-heap ordered on F, falling back to insertion order so equal-cost plans are
+        /// chosen deterministically. Push and pop are O(log n) instead of the O(n) scan a plain
+        /// list needs to find its cheapest entry.
+        /// </summary>
+        private class MinHeap
+        {
+            private readonly List<Node> _items = new List<Node>();
+
+            public int Count => _items.Count;
+
+            public void Clear()
+            {
+                _items.Clear();
+            }
+
+            public void Push(Node node)
+            {
+                _items.Add(node);
+                int child = _items.Count - 1;
+                while (child > 0)
+                {
+                    int parent = (child - 1) / 2;
+                    if (!IsBetter(_items[child], _items[parent]))
+                        break;
+                    Swap(child, parent);
+                    child = parent;
+                }
+            }
+
+            public Node Pop()
+            {
+                Node top = _items[0];
+                int last = _items.Count - 1;
+                _items[0] = _items[last];
+                _items.RemoveAt(last);
+
+                int parent = 0;
+                while (true)
+                {
+                    int left = parent * 2 + 1;
+                    if (left >= _items.Count)
+                        break;
+
+                    int best = left;
+                    int right = left + 1;
+                    if (right < _items.Count && IsBetter(_items[right], _items[left]))
+                        best = right;
+
+                    if (!IsBetter(_items[best], _items[parent]))
+                        break;
+
+                    Swap(best, parent);
+                    parent = best;
+                }
+                return top;
+            }
+
+            private static bool IsBetter(Node a, Node b)
+            {
+                if (a.F != b.F)
+                    return a.F < b.F;
+                return a.Sequence < b.Sequence;
+            }
+
+            private void Swap(int a, int b)
+            {
+                Node temp = _items[a];
+                _items[a] = _items[b];
+                _items[b] = temp;
+            }
         }
     }
 }
