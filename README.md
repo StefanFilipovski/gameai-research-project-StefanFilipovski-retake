@@ -2,7 +2,11 @@
 
 **Author:** Stefan Filipovski
 **Engine:** Unity 6 (6000.3, Built-in Render Pipeline), C#
-**Repository:** https://github.com/StefanFilipovski/gameai-research-project-StefanFilipovski-retake
+
+> **Note on this repository.** The retake assignment points at the same GitHub Classroom
+> repository as the first take, so this branch (`main`) holds the **retake** research project on
+> GOAP. The original first-take project on Flow Fields is untouched and preserved on the
+> [`first-take-flowfields`](../../tree/first-take-flowfields) branch.
 
 > A small, self-contained Unity demo of an agent that *plans* its own behaviour with A\*
 > instead of following a hand-authored script. A woodcutter is given a goal — "deliver wood"
